@@ -69,7 +69,7 @@ export default function HomePage() {
               href="/admin"
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-600/20 transition hover:bg-indigo-700"
             >
-              <span>כניסה לממשק הנהלה (/admin)</span>
+              <span>כניסה לממשק הנהלה</span>
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </div>
@@ -112,7 +112,7 @@ export default function HomePage() {
               href="/teacher"
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white shadow-md shadow-sky-600/20 transition hover:bg-sky-700"
             >
-              <span>כניסה לממשק מורה (/teacher)</span>
+              <span>כניסה לממשק מורה</span>
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </div>
