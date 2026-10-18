@@ -34,6 +34,15 @@ export interface Teacher {
   institution_code?: string | null;
 }
 
+export interface InstitutionTimeSlot {
+  id: string;
+  institution_code: string;
+  period_number: number;
+  start_time: string; // "HH:MM" or "HH:MM:SS"
+  end_time: string;   // "HH:MM" or "HH:MM:SS"
+  created_at?: string;
+}
+
 export interface ScheduleTemplate {
   id: string;
   teacher_id: string;
@@ -43,6 +52,7 @@ export interface ScheduleTemplate {
   subject: string;
   class_name?: string | null;
   institution_code?: string | null;
+  period_number?: number | null;
 }
 
 export interface WeeklyActualReport {
@@ -57,6 +67,7 @@ export interface WeeklyActualReport {
   status: ReportStatus;
   notes: string;
   institution_code?: string | null;
+  period_number?: number | null;
 }
 
 export interface EnrichedSessionItem {
@@ -73,6 +84,7 @@ export interface EnrichedSessionItem {
   class_name?: string | null;
   status: ReportStatus;
   notes: string;
+  period_number?: number | null;
 }
 
 export const HEBREW_DAYS: Record<number, string> = {

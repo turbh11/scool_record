@@ -171,3 +171,27 @@ DO $$ BEGIN
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
+
+-- ============================================================================
+-- 8. BELL SCHEDULE / מערכת צלצולים (institution_time_slots) & PERIOD NUMBERS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.institution_time_slots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    institution_code TEXT NOT NULL,
+    period_number INT NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.schedule_templates ADD COLUMN IF NOT EXISTS period_number INT;
+ALTER TABLE public.weekly_actual_reports ADD COLUMN IF NOT EXISTS period_number INT;
+
+CREATE INDEX IF NOT EXISTS idx_time_slots_institution ON public.institution_time_slots(institution_code);
+
+ALTER TABLE public.institution_time_slots ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all access to institution_time_slots" ON public.institution_time_slots;
+CREATE POLICY "Allow all access to institution_time_slots"
+    ON public.institution_time_slots FOR ALL TO anon, authenticated
+    USING (true) WITH CHECK (true);
+

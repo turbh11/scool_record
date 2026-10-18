@@ -21,6 +21,7 @@ import {
   Loader2,
   Users,
   KeyRound,
+  Bell,
 } from 'lucide-react';
 import {
   School,
@@ -67,6 +68,7 @@ import WeeklyTimeGrid from '@/components/admin/WeeklyTimeGrid';
 import StatusOverrideModal from '@/components/admin/StatusOverrideModal';
 import SchoolSettingsModal from '@/components/admin/SchoolSettingsModal';
 import ChangePasswordModal from '@/components/admin/ChangePasswordModal';
+import BellScheduleModal from '@/components/admin/BellScheduleModal';
 import TeacherScheduleModal, {
   TeacherFormPayload,
 } from '@/components/admin/TeacherScheduleModal';
@@ -107,6 +109,7 @@ export default function AdminDashboardPage() {
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] =
     useState<boolean>(false);
+  const [isBellScheduleOpen, setIsBellScheduleOpen] = useState<boolean>(false);
   const [isManageTeachersOpen, setIsManageTeachersOpen] =
     useState<boolean>(false);
   const [isSeeding, setIsSeeding] = useState<boolean>(false);
@@ -609,6 +612,7 @@ export default function AdminDashboardPage() {
           class_name: matchingReport?.class_name ?? tpl.class_name ?? null,
           status: safeStatus,
           notes: matchingReport?.notes ?? '',
+          period_number: tpl.period_number ?? null,
         };
       })
       .filter((item): item is EnrichedSessionItem => item !== null);
@@ -1069,6 +1073,7 @@ export default function AdminDashboardPage() {
       duration_minutes: number;
       subject: string;
       class_name?: string | null;
+      period_number?: number | null;
     },
     options?: { silent?: boolean }
   ): Promise<ScheduleTemplate | null> => {
@@ -1086,6 +1091,7 @@ export default function AdminDashboardPage() {
           subject: templateData.subject,
           class_name: templateData.class_name ?? null,
           institution_code: effectiveCode,
+          period_number: templateData.period_number ?? null,
         });
 
         if (error || !updated) {
@@ -1115,6 +1121,7 @@ export default function AdminDashboardPage() {
               subject: templateData.subject,
               class_name: templateData.class_name ?? null,
               institution_code: tpl.institution_code || effectiveCode,
+              period_number: templateData.period_number ?? tpl.period_number ?? null,
             };
             return updatedLocal;
           }
@@ -1138,6 +1145,7 @@ export default function AdminDashboardPage() {
             subject: templateData.subject,
             class_name: templateData.class_name ?? null,
             institution_code: effectiveCode,
+            period_number: templateData.period_number ?? null,
           }
         );
 
@@ -1163,6 +1171,7 @@ export default function AdminDashboardPage() {
         subject: templateData.subject,
         class_name: templateData.class_name ?? null,
         institution_code: effectiveCode,
+        period_number: templateData.period_number ?? null,
       };
       setTemplates((prev) => [...prev, localTpl]);
       if (!options?.silent) {
@@ -1312,6 +1321,7 @@ export default function AdminDashboardPage() {
               duration_minutes: row.duration_minutes || 45,
               subject: row.template_subject || row.subject,
               class_name: row.class_name || null,
+              period_number: row.period_number ?? null,
             },
             { silent: true }
           );
@@ -1613,6 +1623,16 @@ export default function AdminDashboardPage() {
 
             <button
               type="button"
+              onClick={() => setIsBellScheduleOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs sm:text-sm font-semibold text-slate-700 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/50 hover:text-indigo-700"
+              title="מערכת צלצולים ושעות שיעורים"
+            >
+              <Bell className="h-4 w-4 text-indigo-600" />
+              <span>מערכת צלצולים</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setIsSettingsOpen(true)}
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs sm:text-sm font-semibold text-slate-700 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/50 hover:text-indigo-700"
             >
@@ -1831,6 +1851,14 @@ export default function AdminDashboardPage() {
       <ChangePasswordModal
         isOpen={isChangePasswordOpen}
         onClose={() => setIsChangePasswordOpen(false)}
+        onShowToast={showToast}
+      />
+
+      {/* Bell Schedule Modal */}
+      <BellScheduleModal
+        isOpen={isBellScheduleOpen}
+        onClose={() => setIsBellScheduleOpen(false)}
+        institutionCode={adminInstitutionCode || school?.semel_mosad || null}
         onShowToast={showToast}
       />
 

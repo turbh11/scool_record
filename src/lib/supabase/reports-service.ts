@@ -39,6 +39,7 @@ export interface SaveScheduleTemplatePayload {
   subject: string;
   class_name?: string | null;
   institution_code?: string | null;
+  period_number?: number | null;
 }
 
 export const UUID_REGEX =
@@ -241,6 +242,7 @@ export async function saveScheduleTemplateSafe(
         duration_minutes: payload.duration_minutes,
         subject: payload.subject,
         class_name: payload.class_name || null,
+        period_number: payload.period_number !== undefined ? payload.period_number : null,
       };
 
       if (payload.institution_code) {
@@ -286,6 +288,7 @@ export async function saveScheduleTemplateSafe(
                 ...fallbackData,
                 class_name: payload.class_name || null,
                 institution_code: payload.institution_code || null,
+                period_number: payload.period_number ?? null,
               } as ScheduleTemplate)
             : null,
           error: null,
@@ -301,6 +304,7 @@ export async function saveScheduleTemplateSafe(
         duration_minutes: payload.duration_minutes,
         subject: payload.subject,
         class_name: payload.class_name || null,
+        period_number: payload.period_number !== undefined ? payload.period_number : null,
       };
 
       if (payload.institution_code) {
@@ -348,6 +352,7 @@ export async function saveScheduleTemplateSafe(
                 ...fallbackData,
                 class_name: payload.class_name || null,
                 institution_code: payload.institution_code || null,
+                period_number: payload.period_number ?? null,
               } as ScheduleTemplate)
             : null,
           error: null,

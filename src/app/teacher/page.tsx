@@ -31,6 +31,7 @@ import {
   EnrichedSessionItem,
   ReportStatus,
   HEBREW_DAYS,
+  InstitutionTimeSlot,
 } from '@/types/database';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
 import {
@@ -48,6 +49,15 @@ import {
   FALLBACK_TEMPLATES,
   buildInitialFallbackReports,
 } from '@/lib/demo-data';
+
+const DEFAULT_BELL_TIME_SLOTS: InstitutionTimeSlot[] = [
+  { id: 'preset-1', institution_code: '', period_number: 1, start_time: '08:00', end_time: '08:45' },
+  { id: 'preset-2', institution_code: '', period_number: 2, start_time: '08:50', end_time: '09:35' },
+  { id: 'preset-3', institution_code: '', period_number: 3, start_time: '09:50', end_time: '10:35' },
+  { id: 'preset-4', institution_code: '', period_number: 4, start_time: '10:40', end_time: '11:25' },
+  { id: 'preset-5', institution_code: '', period_number: 5, start_time: '11:35', end_time: '12:20' },
+  { id: 'preset-6', institution_code: '', period_number: 6, start_time: '12:25', end_time: '13:10' },
+];
 import TeacherScheduleList from '@/components/teacher/TeacherScheduleList';
 
 function TeacherDashboardContent() {
@@ -83,6 +93,11 @@ function TeacherDashboardContent() {
   const [slotClassName, setSlotClassName] = useState<string>('');
   const [isSavingSlot, setIsSavingSlot] = useState<boolean>(false);
   const [deletingSlotId, setDeletingSlotId] = useState<string | null>(null);
+
+  // Bell Schedule & Hybrid Period State
+  const [timeSlots, setTimeSlots] = useState<InstitutionTimeSlot[]>(DEFAULT_BELL_TIME_SLOTS);
+  const [selectedPeriodOption, setSelectedPeriodOption] = useState<string>('custom');
+  const [slotPeriodNumber, setSlotPeriodNumber] = useState<number | null>(null);
 
   // Dual-Role Check (Admin switching to Teacher)
   const [isUserAdmin, setIsUserAdmin] = useState<boolean>(false);
@@ -269,8 +284,9 @@ function TeacherDashboardContent() {
             });
         }
 
-        // Strictly fetch only this teacher's schedule_templates and reports between weekStart and weekEnd
-        const [tplRes, repRes] = await Promise.all([
+        // Strictly fetch only this teacher's schedule_templates, reports, and institution_time_slots
+        const effectiveCode = resolvedTeacher.institution_code;
+        const [tplRes, repRes, slotsRes] = await Promise.all([
           supabase
             .from('schedule_templates')
             .select('*')
@@ -281,6 +297,13 @@ function TeacherDashboardContent() {
             .eq('teacher_id', resolvedTeacher.id)
             .gte('report_date', weekStart)
             .lte('report_date', weekEnd),
+          effectiveCode
+            ? supabase
+                .from('institution_time_slots')
+                .select('*')
+                .eq('institution_code', effectiveCode)
+                .order('period_number', { ascending: true })
+            : Promise.resolve({ data: null, error: null }),
         ]);
 
         const fetchedReports = ((repRes.data || []) as WeeklyActualReport[]).filter(
@@ -289,6 +312,9 @@ function TeacherDashboardContent() {
 
         setTemplates((tplRes.data || []) as ScheduleTemplate[]);
         setReports(fetchedReports);
+        if (slotsRes?.data && (slotsRes.data as any[]).length > 0) {
+          setTimeSlots(slotsRes.data as InstitutionTimeSlot[]);
+        }
       } catch (err) {
         console.error('Error loading isolated teacher dashboard:', err);
         if (!isSilent) {
@@ -389,6 +415,7 @@ function TeacherDashboardContent() {
           class_name: matchingReport?.class_name ?? tpl.class_name ?? null,
           status: safeStatus,
           notes: matchingReport?.notes ?? '',
+          period_number: tpl.period_number ?? null,
         };
       })
       .filter((item): item is EnrichedSessionItem => item !== null);
@@ -538,21 +565,78 @@ function TeacherDashboardContent() {
   };
 
   // Self-Service Fixed Schedule Template Management Handlers
+  const handlePeriodSelectChange = (val: string) => {
+    setSelectedPeriodOption(val);
+    if (val === 'custom') {
+      setSlotPeriodNumber(null);
+    } else {
+      const matched = timeSlots.find(
+        (s) => s.id === val || String(s.period_number) === val
+      );
+      if (matched) {
+        setSlotPeriodNumber(matched.period_number);
+        const normStart = normalizeTime(matched.start_time);
+        const normEnd = normalizeTime(matched.end_time);
+        setSlotTime(normStart);
+
+        const [sh, sm] = normStart.split(':').map(Number);
+        const [eh, em] = normEnd.split(':').map(Number);
+        const diff = eh * 60 + em - (sh * 60 + sm);
+        setSlotDuration(diff > 0 ? diff : 45);
+      }
+    }
+  };
+
   const handleStartEditSlot = (tpl: ScheduleTemplate) => {
     setEditingSlotId(tpl.id);
     setSlotDay(tpl.day_of_week);
-    setSlotTime(normalizeTime(tpl.start_time));
-    setSlotDuration(tpl.duration_minutes);
     setSlotSubject(tpl.subject);
     setSlotClassName(tpl.class_name || '');
+    const normTplTime = normalizeTime(tpl.start_time);
+    setSlotTime(normTplTime);
+    setSlotDuration(tpl.duration_minutes);
+
+    let matchedSlot: InstitutionTimeSlot | undefined = undefined;
+    if (tpl.period_number) {
+      matchedSlot = timeSlots.find((s) => s.period_number === tpl.period_number);
+    }
+    if (!matchedSlot) {
+      matchedSlot = timeSlots.find(
+        (s) => normalizeTime(s.start_time) === normTplTime
+      );
+    }
+
+    if (matchedSlot && tpl.period_number) {
+      setSelectedPeriodOption(matchedSlot.id);
+      setSlotPeriodNumber(matchedSlot.period_number);
+    } else {
+      setSelectedPeriodOption('custom');
+      setSlotPeriodNumber(tpl.period_number ?? null);
+    }
+
     setIsEditingScheduleOpen(true);
   };
 
   const handleCancelEditSlot = () => {
     setEditingSlotId(null);
     setSlotDay(1);
-    setSlotTime('09:00');
-    setSlotDuration(45);
+    if (timeSlots.length > 0) {
+      const first = timeSlots[0];
+      setSelectedPeriodOption(first.id);
+      setSlotPeriodNumber(first.period_number);
+      const normStart = normalizeTime(first.start_time);
+      const normEnd = normalizeTime(first.end_time);
+      setSlotTime(normStart);
+      const [sh, sm] = normStart.split(':').map(Number);
+      const [eh, em] = normEnd.split(':').map(Number);
+      const diff = eh * 60 + em - (sh * 60 + sm);
+      setSlotDuration(diff > 0 ? diff : 45);
+    } else {
+      setSelectedPeriodOption('custom');
+      setSlotPeriodNumber(null);
+      setSlotTime('09:00');
+      setSlotDuration(45);
+    }
     setSlotSubject(activeTeacher?.subject || '');
     setSlotClassName('');
   };
@@ -588,6 +672,7 @@ function TeacherDashboardContent() {
           subject: slotSubject.trim(),
           class_name: slotClassName.trim() || null,
           institution_code: effectiveCode,
+          period_number: slotPeriodNumber,
         });
 
         if (error || !updated) {
@@ -611,6 +696,7 @@ function TeacherDashboardContent() {
           subject: slotSubject.trim(),
           class_name: slotClassName.trim() || null,
           institution_code: effectiveCode,
+          period_number: slotPeriodNumber,
         });
 
         if (error || !inserted) {
@@ -636,7 +722,7 @@ function TeacherDashboardContent() {
                   duration_minutes: Number(slotDuration) || 45,
                   subject: slotSubject.trim(),
                   class_name: slotClassName.trim() || null,
-                  institution_code: effectiveCode,
+                  period_number: slotPeriodNumber,
                 }
               : tpl
           )
@@ -652,6 +738,7 @@ function TeacherDashboardContent() {
           subject: slotSubject.trim(),
           class_name: slotClassName.trim() || null,
           institution_code: effectiveCode,
+          period_number: slotPeriodNumber,
         };
         setTemplates((prev) => [...prev, localSlot]);
         showToast('משבצת השעה נוספה למערכת הקבועה!');
@@ -659,9 +746,7 @@ function TeacherDashboardContent() {
     }
 
     // Reset state on success
-    setEditingSlotId(null);
-    setSlotClassName('');
-    setSlotSubject(activeTeacher.subject || '');
+    handleCancelEditSlot();
     setIsSavingSlot(false);
   };
 
@@ -911,7 +996,13 @@ function TeacherDashboardContent() {
                 )}
               </h3>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-5">
+              <div
+                className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${
+                  selectedPeriodOption === 'custom'
+                    ? 'md:grid-cols-6'
+                    : 'md:grid-cols-4'
+                }`}
+              >
                 {/* Day of Week */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-600 mb-1">
@@ -930,36 +1021,59 @@ function TeacherDashboardContent() {
                   </select>
                 </div>
 
-                {/* Start Time */}
+                {/* Period Selector (Replacing raw Start Time & Duration) */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    שעת התחלה *
+                    שיעור (מערכת צלצולים) *
                   </label>
-                  <input
-                    type="time"
-                    value={slotTime}
-                    onChange={(e) => setSlotTime(e.target.value)}
-                    required
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:border-sky-500"
-                  />
+                  <select
+                    value={selectedPeriodOption}
+                    onChange={(e) => handlePeriodSelectChange(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-sky-500"
+                  >
+                    {timeSlots.map((ts) => (
+                      <option key={ts.id} value={ts.id}>
+                        שיעור {ts.period_number} ({normalizeTime(ts.start_time)} - {normalizeTime(ts.end_time)})
+                      </option>
+                    ))}
+                    <option value="custom">שעה מותאמת אישית</option>
+                  </select>
                 </div>
 
-                {/* Duration */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    משך (דקות) *
-                  </label>
-                  <input
-                    type="number"
-                    min="15"
-                    max="180"
-                    step="5"
-                    value={slotDuration}
-                    onChange={(e) => setSlotDuration(Number(e.target.value))}
-                    required
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:border-sky-500"
-                  />
-                </div>
+                {/* Manual Start Time (Revealed on Custom Time) */}
+                {selectedPeriodOption === 'custom' && (
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      שעת התחלה *
+                    </label>
+                    <input
+                      type="time"
+                      value={slotTime}
+                      onChange={(e) => setSlotTime(e.target.value)}
+                      required
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:border-sky-500"
+                    />
+                  </div>
+                )}
+
+                {/* Manual Duration (Revealed on Custom Time) */}
+                {selectedPeriodOption === 'custom' && (
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      משך (דקות) *
+                    </label>
+                    <input
+                      type="number"
+                      min="15"
+                      max="180"
+                      step="5"
+                      value={slotDuration}
+                      onChange={(e) => setSlotDuration(Number(e.target.value))}
+                      required
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:border-sky-500"
+                    />
+                  </div>
+                )}
 
                 {/* Subject */}
                 <div>
@@ -1050,6 +1164,11 @@ function TeacherDashboardContent() {
                           <span className="rounded-lg bg-sky-100 px-2 py-0.5 text-[11px] font-bold text-sky-800">
                             {HEBREW_DAYS[tpl.day_of_week]}
                           </span>
+                          {tpl.period_number && (
+                            <span className="rounded-lg bg-indigo-100 px-2 py-0.5 text-[11px] font-bold text-indigo-800">
+                              שיעור {tpl.period_number}
+                            </span>
+                          )}
                           <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700">
                             <Clock className="h-3 w-3 text-slate-400" />
                             <span>

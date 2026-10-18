@@ -193,7 +193,10 @@ export default function WeeklyTimeGrid({
                                     </div>
 
                                     <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-500">
-                                      <span>{session.duration_minutes} דק׳</span>
+                                      <span>
+                                        {session.period_number ? `שיעור ${session.period_number} • ` : ''}
+                                        {session.duration_minutes} דק׳
+                                      </span>
                                       {session.notes && (
                                         <span
                                           className="inline-flex items-center gap-1 truncate max-w-[120px] text-slate-600"

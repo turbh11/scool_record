@@ -75,6 +75,7 @@ interface TeacherScheduleModalProps {
       duration_minutes: number;
       subject: string;
       class_name?: string | null;
+      period_number?: number | null;
     }
   ) => Promise<any>;
   onDeleteTemplate: (templateId: string) => Promise<void>;

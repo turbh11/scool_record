@@ -17,6 +17,7 @@ export interface ParsedExcelTeacher {
   duration_minutes?: number;
   template_subject?: string;
   class_name?: string;
+  period_number?: number | null;
 }
 
 /**
@@ -45,23 +46,41 @@ export function normalizeTimeToHHMM(val: any): string | undefined {
 /**
  * Exports the current sessions (weekly or monthly summary) to an RTL Hebrew .xlsx file
  * formatted for Ministry of Education (משרד החינוך) reporting, including the "כיתה" (Class) column.
+ * Formats period_number readably ("שיעור 3 (10:00-10:45)") or falls back to raw start time.
  */
 export function exportReportsToExcel(
   sessions: EnrichedSessionItem[],
   schoolName: string,
   periodLabel: string
 ) {
-  const rows = sessions.map((session) => ({
-    'שם המורה': session.teacher_name,
-    'תאריך': session.report_date,
-    'יום בשבוע': HEBREW_DAYS[session.day_of_week] || `יום ${session.day_of_week}`,
-    'שעת התחלה': session.start_time,
-    'משך בדקות': session.duration_minutes,
-    'תחום דעת': session.subject,
-    'כיתה': session.class_name || '',
-    'סטטוס ביצוע': STATUS_CONFIG[session.status]?.label || session.status,
-    'הערות': session.notes || '',
-  }));
+  const rows = sessions.map((session) => {
+    let formattedTime = session.start_time;
+    if (session.period_number) {
+      let timeRange = session.start_time;
+      if (session.start_time && session.duration_minutes) {
+        const [h, m] = session.start_time.split(':').map(Number);
+        if (!isNaN(h) && !isNaN(m)) {
+          const totalEndMin = h * 60 + m + session.duration_minutes;
+          const endH = String(Math.floor(totalEndMin / 60) % 24).padStart(2, '0');
+          const endM = String(totalEndMin % 60).padStart(2, '0');
+          timeRange = `${session.start_time}-${endH}:${endM}`;
+        }
+      }
+      formattedTime = `שיעור ${session.period_number} (${timeRange})`;
+    }
+
+    return {
+      'שם המורה': session.teacher_name,
+      'תאריך': session.report_date,
+      'יום בשבוע': HEBREW_DAYS[session.day_of_week] || `יום ${session.day_of_week}`,
+      'שעת התחלה': formattedTime,
+      'משך בדקות': session.duration_minutes,
+      'תחום דעת': session.subject,
+      'כיתה': session.class_name || '',
+      'סטטוס ביצוע': STATUS_CONFIG[session.status]?.label || session.status,
+      'הערות': session.notes || '',
+    };
+  });
 
   const worksheet = XLSX.utils.json_to_sheet(rows);
 
@@ -74,7 +93,7 @@ export function exportReportsToExcel(
     { wch: 20 }, // שם המורה
     { wch: 14 }, // תאריך
     { wch: 14 }, // יום בשבוע
-    { wch: 12 }, // שעת התחלה
+    { wch: 24 }, // שעת התחלה (מותאם גם ל"שיעור 3 (10:00-10:45)")
     { wch: 12 }, // משך בדקות
     { wch: 24 }, // תחום דעת
     { wch: 14 }, // כיתה
@@ -98,7 +117,7 @@ export function exportReportsToExcel(
 }
 
 /**
- * Downloads a sample Excel template (.xlsx) for bulk importing teachers (including phone, email, class_name, and optional schedule slots).
+ * Downloads a sample Excel template (.xlsx) for bulk importing teachers (including phone, email, class_name, bell period, and optional schedule slots).
  */
 export function downloadTeacherImportTemplate() {
   const sampleRows = [
@@ -108,7 +127,8 @@ export function downloadTeacherImportTemplate() {
       'טלפון': '052-3344556',
       'מייל': 'ronit.s@school.edu.il',
       'יום בשבוע (1-6, אופציונלי)': 1,
-      'שעת התחלה (אופציונלי)': '09:00',
+      'מספר שיעור (אופציונלי)': 2,
+      'שעת התחלה (אופציונלי)': '08:50',
       'משך בדקות (אופציונלי)': 45,
       'נושא פרטני (אופציונלי)': 'תגבור אלגברה',
       'כיתה': 'ח׳ 3',
@@ -119,7 +139,8 @@ export function downloadTeacherImportTemplate() {
       'טלפון': '054-9988776',
       'מייל': 'avigdor.l@school.edu.il',
       'יום בשבוע (1-6, אופציונלי)': 3,
-      'שעת התחלה (אופציונלי)': '10:00',
+      'מספר שיעור (אופציונלי)': 3,
+      'שעת התחלה (אופציונלי)': '09:50',
       'משך בדקות (אופציונלי)': 45,
       'נושא פרטני (אופציונלי)': 'הכנה לבגרות היסטוריה',
       'כיתה': 'י״א 2',
@@ -134,6 +155,7 @@ export function downloadTeacherImportTemplate() {
     { wch: 16 },
     { wch: 24 },
     { wch: 26 },
+    { wch: 22 },
     { wch: 22 },
     { wch: 22 },
     { wch: 26 },
@@ -237,6 +259,27 @@ export async function parseTeachersExcelFile(
 
     if (!name) continue;
 
+    const rawPeriod =
+      normalizedRow['מספר שיעור (אופציונלי)'] ||
+      normalizedRow['מספר שיעור'] ||
+      normalizedRow['מס׳ שיעור'] ||
+      normalizedRow['שיעור'] ||
+      normalizedRow['Period'] ||
+      normalizedRow['period'] ||
+      normalizedRow['period_number'] ||
+      '';
+
+    let periodNumber: number | null = null;
+    if (rawPeriod !== '' && rawPeriod !== undefined && rawPeriod !== null) {
+      const match = String(rawPeriod).match(/\d+/);
+      if (match) {
+        const p = parseInt(match[0], 10);
+        if (!isNaN(p) && p > 0) {
+          periodNumber = p;
+        }
+      }
+    }
+
     const rawDay =
       normalizedRow['יום בשבוע (1-6, אופציונלי)'] ||
       normalizedRow['יום בשבוע'] ||
@@ -308,6 +351,7 @@ export async function parseTeachersExcelFile(
       phone,
       email,
       day_of_week: dayNum,
+      period_number: periodNumber,
       start_time: startTime,
       end_time: endTime,
       duration_minutes: duration,
