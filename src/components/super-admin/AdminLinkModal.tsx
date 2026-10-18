@@ -12,7 +12,10 @@ import {
   AlertCircle,
   ExternalLink,
 } from 'lucide-react';
-import { generateAdminLoginLink } from '@/app/actions/super-admin-actions';
+import {
+  generateAdminLoginLink,
+  sendMagicLinkEmail,
+} from '@/app/actions/super-admin-actions';
 
 export interface AdminDetails {
   name: string;
@@ -37,6 +40,7 @@ export default function AdminLinkModal({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+  const [isSendingEmail, setIsSendingEmail] = useState<boolean>(false);
 
   const fetchLink = useCallback(async () => {
     if (!admin?.email) return;
@@ -71,6 +75,7 @@ export default function AdminLinkModal({
       setLink('');
       setError(null);
       setCopied(false);
+      setIsSendingEmail(false);
     }
   }, [isOpen, admin?.email, fetchLink]);
 
@@ -92,15 +97,22 @@ export default function AdminLinkModal({
     onShowToast?.('נפתח וואטסאפ לשליחת הקישור');
   };
 
-  const handleEmail = () => {
-    if (!link) return;
-    const subject = `קישור התחברות למערכת דיווח שעות פרטניות - ${admin.school}`;
-    const body = `שלום ${admin.name},\n\nמצורף קישור התחברות מאובטח (Magic Link) לממשק ניהול שעות פרטניות עבור ${admin.school}:\n\n${link}\n\nקישור זה מאפשר כניסה ישירה למערכת ללא צורך בסיסמה.\n\nבברכה,\nהנהלת המערכת`;
-    const mailtoUrl = `mailto:${encodeURIComponent(admin.email)}?subject=${encodeURIComponent(
-      subject
-    )}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailtoUrl;
-    onShowToast?.('נפתח יישום הדוא״ל');
+  const handleSendEmail = async () => {
+    if (!link || !admin?.email) return;
+    setIsSendingEmail(true);
+    try {
+      const res = await sendMagicLinkEmail(admin.email, link, admin.school);
+      if (res.success) {
+        onShowToast?.(`אימייל עם קישור התחברות נשלח בהצלחה אל ${admin.email}!`);
+      } else {
+        onShowToast?.(`שגיאה בשליחת הדוא״ל: ${res.error || 'נא לוודא הגדרות Gmail'}`);
+      }
+    } catch (err: any) {
+      console.error('[AdminLinkModal] Error sending magic link email:', err);
+      onShowToast?.('שגיאה בשליחת הדוא״ל');
+    } finally {
+      setIsSendingEmail(false);
+    }
   };
 
   return (
@@ -217,12 +229,17 @@ export default function AdminLinkModal({
                   {/* Email */}
                   <button
                     type="button"
-                    onClick={handleEmail}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs font-bold text-sky-800 shadow-2xs transition hover:bg-sky-100 hover:border-sky-300"
-                    title={`פתח דוא״ל אל ${admin.email}`}
+                    disabled={isSendingEmail || !link}
+                    onClick={handleSendEmail}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs font-bold text-sky-800 shadow-2xs transition hover:bg-sky-100 hover:border-sky-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={`שלח דוא״ל אל ${admin.email}`}
                   >
-                    <Mail className="h-4 w-4 text-sky-600" />
-                    <span>אימייל</span>
+                    {isSendingEmail ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-sky-600" />
+                    ) : (
+                      <Mail className="h-4 w-4 text-sky-600" />
+                    )}
+                    <span>{isSendingEmail ? 'שולח...' : 'שלח בדוא״ל'}</span>
                   </button>
                 </div>
               </div>

@@ -6,6 +6,10 @@ import { createClient as createSupabaseJsClient } from '@supabase/supabase-js';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { isSuperAdminEmail } from '@/lib/super-admin';
+import {
+  generateAdminLoginLink,
+  sendMagicLinkEmail,
+} from './super-admin-actions';
 
 export interface OnboardAdminInput {
   adminName: string;
@@ -374,41 +378,26 @@ export async function registerNewSchoolAdmin(
       }
     }
 
-    // 3. Send Welcome Email via Nodemailer (Gmail SMTP)
-    const transporter = createGmailTransporter();
-    const gmailUser = process.env.GMAIL_USER?.trim();
-    const loginUrl = `${cleanOrigin}/admin/login`;
-
-    if (!transporter || !gmailUser) {
-      return {
-        success: true,
-        emailSent: false,
-        userId: createdUserId,
-        generatedPassword,
-        message: `סביבת בית הספר "${schoolName}" הוקמה בהצלחה! (שים לב: לא נשלח מייל כי חסרים פרטי GMAIL_USER / GMAIL_APP_PASSWORD ב-.env.local. הסיסמה שנוצרה מוצגת למטה).`,
-      };
+    // 3. Automatically generate Magic Link and send onboarding email completely in the background
+    let emailSent = false;
+    try {
+      const linkRes = await generateAdminLoginLink(email, cleanOrigin);
+      if (linkRes.success && linkRes.link) {
+        const mailRes = await sendMagicLinkEmail(email, linkRes.link, schoolName);
+        emailSent = Boolean(mailRes.success);
+      }
+    } catch (mailErr) {
+      console.warn('Background magic link onboarding email failed:', mailErr);
     }
-
-    await transporter.sendMail({
-      from: `"מערכת שעות פרטניות" <${gmailUser}>`,
-      to: email,
-      subject: `ברוכים הבאים למערכת שעות פרטניות - פרטי גישה להנהלת ${schoolName}`,
-      html: buildAdminWelcomeEmailHtml({
-        adminName,
-        schoolName,
-        institutionCode,
-        email,
-        password: generatedPassword,
-        loginUrl,
-      }),
-    });
 
     return {
       success: true,
-      emailSent: true,
+      emailSent,
       userId: createdUserId,
       generatedPassword,
-      message: `סביבת בית הספר "${schoolName}" הוקמה בהצלחה ופרטי ההתחברות נשלחו בדוא"ל אל ${email}!`,
+      message: emailSent
+        ? `סביבת בית הספר "${schoolName}" הוקמה בהצלחה וקישור התחברות ישיר נשלח בדוא"ל אל ${email}!`
+        : `סביבת בית הספר "${schoolName}" הוקמה בהצלחה! (פרטי הגישה והסיסמה שנוצרה מוצגים למטה).`,
     };
   } catch (err: any) {
     console.error('Error in registerNewSchoolAdmin:', err);

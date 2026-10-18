@@ -22,6 +22,10 @@ import {
   Link2,
 } from 'lucide-react';
 import { registerNewSchoolAdmin } from '@/app/actions/admin-onboarding';
+import {
+  getActiveInstitutions,
+  toggleInstitutionActive,
+} from '@/app/actions/super-admin-actions';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
 import { AdminProfile } from '@/types/database';
 import AdminLinkModal, {
@@ -94,21 +98,18 @@ export default function SuperAdminOnboardingPage() {
 
     try {
       setIsLoadingProfiles(true);
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from('admin_profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const res = await getActiveInstitutions();
 
-      if (error) {
-        console.error('Error fetching admin profiles:', error);
-        showToast('שגיאה בטעינת רשימת המוסדות');
+      if (!res.success) {
+        console.error('Error fetching admin profiles:', res.error);
+        showToast(res.error || 'שגיאה בטעינת רשימת המוסדות');
         return;
       }
 
-      setProfiles((data || []) as AdminProfile[]);
+      setProfiles((res.data || []) as AdminProfile[]);
     } catch (err) {
       console.error('Error in fetchAdminProfiles:', err);
+      showToast('שגיאה בלתי צפויה בטעינת רשימת המוסדות');
     } finally {
       setIsLoadingProfiles(false);
     }
@@ -131,15 +132,11 @@ export default function SuperAdminOnboardingPage() {
     setTogglingProfileId(profile.id);
 
     if (isSupabaseConfigured()) {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from('admin_profiles')
-        .update({ is_active: newStatus })
-        .eq('id', profile.id);
+      const res = await toggleInstitutionActive(profile.id, newStatus);
 
-      if (error) {
-        console.error('Error updating admin profile is_active:', error);
-        showToast(`שגיאה ב${actionText} המוסד`);
+      if (!res.success) {
+        console.error('Error updating admin profile is_active:', res.error);
+        showToast(res.error || `שגיאה ב${actionText} המוסד`);
         setTogglingProfileId(null);
         return;
       }
