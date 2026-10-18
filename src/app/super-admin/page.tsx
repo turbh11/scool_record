@@ -19,10 +19,14 @@ import {
   Play,
   Ban,
   RotateCcw,
+  Link2,
 } from 'lucide-react';
 import { registerNewSchoolAdmin } from '@/app/actions/admin-onboarding';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
 import { AdminProfile } from '@/types/database';
+import AdminLinkModal, {
+  AdminDetails,
+} from '@/components/super-admin/AdminLinkModal';
 
 interface CreatedAdminSummary {
   adminName: string;
@@ -57,6 +61,8 @@ export default function SuperAdminOnboardingPage() {
   const [profiles, setProfiles] = useState<AdminProfile[]>([]);
   const [isLoadingProfiles, setIsLoadingProfiles] = useState<boolean>(true);
   const [togglingProfileId, setTogglingProfileId] = useState<string | null>(null);
+  const [selectedAdminForLink, setSelectedAdminForLink] =
+    useState<AdminDetails | null>(null);
 
   const fetchAdminProfiles = useCallback(async () => {
     if (!isSupabaseConfigured()) {
@@ -430,20 +436,38 @@ export default function SuperAdminOnboardingPage() {
                   סביבת המוסד &quot;{createdSummary.schoolName}&quot; הוקמה בהצלחה!
                 </h3>
               </div>
-              <button
-                type="button"
-                onClick={handleCopySummary}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3 py-1.5 text-xs font-bold text-emerald-800 shadow-sm transition hover:bg-emerald-100"
-              >
-                {copiedCredentials ? (
-                  <Check className="h-3.5 w-3.5 text-emerald-600" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5 text-emerald-600" />
-                )}
-                <span>
-                  {copiedCredentials ? 'הפרטים הועתקו!' : 'העתק פרטי גישה'}
-                </span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedAdminForLink({
+                      name: createdSummary.adminName,
+                      school: createdSummary.schoolName,
+                      email: createdSummary.email,
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-300 bg-white px-3 py-1.5 text-xs font-bold text-indigo-700 shadow-sm transition hover:bg-indigo-50"
+                  title="שלח קישור התחברות ישיר למנהל/ת"
+                >
+                  <Link2 className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>שלח קישור התחברות</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopySummary}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3 py-1.5 text-xs font-bold text-emerald-800 shadow-sm transition hover:bg-emerald-100"
+                >
+                  {copiedCredentials ? (
+                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5 text-emerald-600" />
+                  )}
+                  <span>
+                    {copiedCredentials ? 'הפרטים הועתקו!' : 'העתק פרטי גישה'}
+                  </span>
+                </button>
+              </div>
             </div>
 
             <div className="mt-3 grid grid-cols-1 gap-2 rounded-xl bg-white/90 p-3.5 text-xs text-slate-700 sm:grid-cols-2">
@@ -609,37 +633,55 @@ export default function SuperAdminOnboardingPage() {
                         )}
                       </td>
                       <td className="px-4 py-3.5 text-center">
-                        {isActive ? (
+                        <div className="flex items-center justify-center gap-2">
                           <button
                             type="button"
-                            disabled={togglingProfileId === profile.id}
-                            onClick={() => handleToggleActive(profile)}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-1.5 text-xs font-bold text-rose-700 shadow-2xs transition hover:bg-rose-100 hover:border-rose-300 disabled:opacity-50"
-                            title="הקפא מוסד"
+                            onClick={() =>
+                              setSelectedAdminForLink({
+                                name: profile.admin_name,
+                                school: profile.school_name,
+                                email: profile.email || '',
+                              })
+                            }
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50/80 px-2.5 py-1.5 text-xs font-bold text-indigo-700 shadow-2xs transition hover:bg-indigo-100 hover:border-indigo-300"
+                            title="שלח קישור התחברות ישיר למנהל/ת"
                           >
-                            {togglingProfileId === profile.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin text-rose-600" />
-                            ) : (
-                              <Ban className="h-3.5 w-3.5 text-rose-600" />
-                            )}
-                            <span>הקפא מוסד</span>
+                            <Link2 className="h-3.5 w-3.5 text-indigo-600" />
+                            <span>שלח קישור התחברות</span>
                           </button>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={togglingProfileId === profile.id}
-                            onClick={() => handleToggleActive(profile)}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50/90 px-3 py-1.5 text-xs font-bold text-emerald-800 shadow-2xs transition hover:bg-emerald-100 hover:border-emerald-400 disabled:opacity-50"
-                            title="הפעל מחדש מוסד"
-                          >
-                            {togglingProfileId === profile.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600" />
-                            ) : (
-                              <Play className="h-3.5 w-3.5 text-emerald-600 fill-emerald-600" />
-                            )}
-                            <span>הפעל מחדש</span>
-                          </button>
-                        )}
+
+                          {isActive ? (
+                            <button
+                              type="button"
+                              disabled={togglingProfileId === profile.id}
+                              onClick={() => handleToggleActive(profile)}
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/80 px-2.5 py-1.5 text-xs font-bold text-rose-700 shadow-2xs transition hover:bg-rose-100 hover:border-rose-300 disabled:opacity-50"
+                              title="הקפא מוסד"
+                            >
+                              {togglingProfileId === profile.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-rose-600" />
+                              ) : (
+                                <Ban className="h-3.5 w-3.5 text-rose-600" />
+                              )}
+                              <span>הקפא מוסד</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={togglingProfileId === profile.id}
+                              onClick={() => handleToggleActive(profile)}
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50/90 px-2.5 py-1.5 text-xs font-bold text-emerald-800 shadow-2xs transition hover:bg-emerald-100 hover:border-emerald-400 disabled:opacity-50"
+                              title="הפעל מחדש מוסד"
+                            >
+                              {togglingProfileId === profile.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600" />
+                              ) : (
+                                <Play className="h-3.5 w-3.5 text-emerald-600 fill-emerald-600" />
+                              )}
+                              <span>הפעל מחדש</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -649,6 +691,14 @@ export default function SuperAdminOnboardingPage() {
           </div>
         )}
       </div>
+
+      {/* Admin Login Link Modal */}
+      <AdminLinkModal
+        isOpen={selectedAdminForLink !== null}
+        onClose={() => setSelectedAdminForLink(null)}
+        admin={selectedAdminForLink}
+        onShowToast={showToast}
+      />
     </div>
   );
 }
