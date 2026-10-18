@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { LogOut, Loader2, ShieldCheck, Building2 } from 'lucide-react';
+import { LogOut, Loader2, ShieldCheck, Building2, GraduationCap } from 'lucide-react';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
 
 export interface AdminHeaderProps {
@@ -11,6 +11,8 @@ export interface AdminHeaderProps {
   schoolName?: string | null;
   institutionCode?: string | null;
   isSuperAdmin?: boolean;
+  onSwitchToTeacher?: () => void;
+  isSwitchingToTeacher?: boolean;
 }
 
 export default function AdminHeader({
@@ -18,6 +20,8 @@ export default function AdminHeader({
   schoolName,
   institutionCode,
   isSuperAdmin = false,
+  onSwitchToTeacher,
+  isSwitchingToTeacher = false,
 }: AdminHeaderProps) {
   const router = useRouter();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -55,6 +59,23 @@ export default function AdminHeader({
             </span>
           )}
         </div>
+      )}
+
+      {onSwitchToTeacher && (
+        <button
+          type="button"
+          disabled={isSwitchingToTeacher}
+          onClick={onSwitchToTeacher}
+          className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-white/90 px-3.5 py-2 text-xs sm:text-sm font-bold text-indigo-700 shadow-2xs transition hover:border-indigo-300 hover:bg-indigo-50/80 disabled:opacity-50"
+          title="מעבר לדיווח אישי כמורה"
+        >
+          {isSwitchingToTeacher ? (
+            <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+          ) : (
+            <GraduationCap className="h-4 w-4 text-indigo-600" />
+          )}
+          <span>מעבר לדיווח אישי</span>
+        </button>
       )}
 
       {isSuperAdmin && (

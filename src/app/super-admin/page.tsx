@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import Link from 'next/link';
 import {
   Building2,
   UserCheck,
@@ -14,6 +15,7 @@ import {
   Copy,
   Check,
   ShieldCheck,
+  ArrowRight,
 } from 'lucide-react';
 import { registerNewSchoolAdmin } from '@/app/actions/admin-onboarding';
 
@@ -129,6 +131,18 @@ export default function SuperAdminOnboardingPage() {
 
   return (
     <div className="mx-auto max-w-2xl py-6 space-y-6">
+      {/* Top Header / Navigation Bar with Back Button */}
+      <div className="flex items-center justify-between">
+        <Link
+          href="/admin/login"
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-200/90 bg-white/80 px-4 py-2 text-xs sm:text-sm font-bold text-slate-700 shadow-2xs backdrop-blur-md transition hover:border-indigo-300 hover:bg-white hover:text-indigo-700"
+          title="חזרה למסך התחברות הנהלה"
+        >
+          <ArrowRight className="h-4 w-4" />
+          <span>חזרה למסך התחברות</span>
+        </Link>
+      </div>
+
       {/* Floating Success Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-5 left-5 z-50 flex items-center gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-950/95 px-4 py-3.5 text-sm font-medium text-white shadow-xl backdrop-blur-md">

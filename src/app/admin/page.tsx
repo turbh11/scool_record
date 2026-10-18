@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Settings,
   ChevronRight,
@@ -69,6 +70,8 @@ import TeacherScheduleModal, {
 } from '@/components/admin/TeacherScheduleModal';
 
 export default function AdminDashboardPage() {
+  const router = useRouter();
+
   // Hydration-safe date reference initialized inside useEffect (Critical Lesson #5)
   const [referenceDate, setReferenceDate] = useState<Date | null>(null);
   const [todayIso, setTodayIso] = useState<string>('');
@@ -77,7 +80,9 @@ export default function AdminDashboardPage() {
   // Core Entities State
   const [school, setSchool] = useState<School | null>(null);
   const [adminInstitutionCode, setAdminInstitutionCode] = useState<string | null>(null);
+  const [adminEmail, setAdminEmail] = useState<string | null>(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+  const [isSwitchingToTeacher, setIsSwitchingToTeacher] = useState<boolean>(false);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [templates, setTemplates] = useState<ScheduleTemplate[]>([]);
   const [reports, setReports] = useState<WeeklyActualReport[]>([]);
@@ -163,6 +168,9 @@ export default function AdminDashboardPage() {
         let resolvedSchoolName: string | null = null;
 
         if (user?.id) {
+          if (user.email) {
+            setAdminEmail(user.email);
+          }
           // Evaluate Super Admin status on server securely
           try {
             const isSuper = await getIsSuperAdmin();
@@ -1364,6 +1372,93 @@ export default function AdminDashboardPage() {
     }
   };
 
+  // TASK 3: Admin to Teacher Quick-Switch
+  const handleSwitchToTeacher = async () => {
+    setIsSwitchingToTeacher(true);
+    try {
+      const effectiveCode = adminInstitutionCode || school?.semel_mosad || null;
+      let emailToMatch = adminEmail;
+
+      if (isSupabaseConfigured() && !isUsingFallback) {
+        const supabase = createClient();
+        if (!emailToMatch) {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          emailToMatch = user?.email || null;
+        }
+
+        if (!emailToMatch) {
+          showToast('לא נמצא מורה המשויך לכתובת הדוא"ל של המנהל');
+          return;
+        }
+
+        let query = supabase
+          .from('teachers')
+          .select('*')
+          .ilike('email', emailToMatch.trim());
+
+        if (effectiveCode) {
+          query = query.or(
+            `institution_code.eq.${effectiveCode},institution_code.is.null`
+          );
+        }
+
+        const { data: matchedList, error: queryErr } = await query;
+        if (queryErr) {
+          console.error(
+            '[DB ERROR]: Error searching for teacher by admin email:',
+            queryErr
+          );
+        }
+
+        const matchedTeacher =
+          matchedList && matchedList.length > 0
+            ? (matchedList[0] as Teacher)
+            : null;
+
+        if (!matchedTeacher) {
+          showToast('לא נמצא מורה המשויך לכתובת הדוא"ל של המנהל');
+          return;
+        }
+
+        let token = matchedTeacher.magic_token;
+        if (!token) {
+          token = `token-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+          await supabase
+            .from('teachers')
+            .update({ magic_token: token })
+            .eq('id', matchedTeacher.id);
+        }
+
+        router.push(`/teacher?token=${encodeURIComponent(token)}`);
+      } else {
+        // Fallback / Demo Mode
+        const matchedFallback = teachers.find(
+          (t) =>
+            t.email &&
+            emailToMatch &&
+            t.email.trim().toLowerCase() === emailToMatch.trim().toLowerCase()
+        );
+
+        if (!matchedFallback) {
+          showToast('לא נמצא מורה המשויך לכתובת הדוא"ל של המנהל');
+          return;
+        }
+
+        const token =
+          matchedFallback.magic_token ||
+          `token-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        router.push(`/teacher?token=${encodeURIComponent(token)}`);
+      }
+    } catch (err) {
+      console.error('Error switching to teacher view:', err);
+      showToast('שגיאה במעבר לדיווח אישי');
+    } finally {
+      setIsSwitchingToTeacher(false);
+    }
+  };
+
   // Seed Demo Data into Supabase
   const handleSeedDatabase = async () => {
     if (!isSupabaseConfigured() || !weekInfo || !todayIso) return;
@@ -1519,6 +1614,8 @@ export default function AdminDashboardPage() {
               schoolName={school?.name}
               institutionCode={adminInstitutionCode || school?.semel_mosad}
               isSuperAdmin={isSuperAdmin}
+              onSwitchToTeacher={handleSwitchToTeacher}
+              isSwitchingToTeacher={isSwitchingToTeacher}
             />
           </div>
         </div>
