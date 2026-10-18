@@ -186,6 +186,12 @@ export default function AdminDashboardPage() {
             .eq('id', user.id)
             .maybeSingle();
 
+          if (adminProfile && adminProfile.is_active === false) {
+            await supabase.auth.signOut();
+            router.push('/admin/login?error=account_frozen');
+            return;
+          }
+
           if (adminProfile?.institution_code) {
             resolvedCode = adminProfile.institution_code;
           }

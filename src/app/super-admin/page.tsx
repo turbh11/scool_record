@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import {
   Building2,
@@ -16,8 +16,13 @@ import {
   Check,
   ShieldCheck,
   ArrowRight,
+  Play,
+  Ban,
+  RotateCcw,
 } from 'lucide-react';
 import { registerNewSchoolAdmin } from '@/app/actions/admin-onboarding';
+import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import { AdminProfile } from '@/types/database';
 
 interface CreatedAdminSummary {
   adminName: string;
@@ -48,6 +53,104 @@ export default function SuperAdminOnboardingPage() {
       setToastMessage((prev) => (prev === msg ? null : prev));
     }, 5000);
   }, []);
+
+  const [profiles, setProfiles] = useState<AdminProfile[]>([]);
+  const [isLoadingProfiles, setIsLoadingProfiles] = useState<boolean>(true);
+  const [togglingProfileId, setTogglingProfileId] = useState<string | null>(null);
+
+  const fetchAdminProfiles = useCallback(async () => {
+    if (!isSupabaseConfigured()) {
+      setProfiles([
+        {
+          id: 'demo-admin-1',
+          admin_name: 'ד״ר רונית שפירא',
+          id_number: '012345678',
+          school_name: 'תיכון ממלכתי רבין - תל אביב',
+          institution_code: '440129',
+          email: 'ronit@rabin-school.edu.il',
+          is_active: true,
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: 'demo-admin-2',
+          admin_name: 'יובל כרמי',
+          id_number: '023456789',
+          school_name: 'עירוני א׳ חיפה',
+          institution_code: '550130',
+          email: 'yuval@haifa-school.edu.il',
+          is_active: false,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+      setIsLoadingProfiles(false);
+      return;
+    }
+
+    try {
+      setIsLoadingProfiles(true);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from('admin_profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching admin profiles:', error);
+        showToast('שגיאה בטעינת רשימת המוסדות');
+        return;
+      }
+
+      setProfiles((data || []) as AdminProfile[]);
+    } catch (err) {
+      console.error('Error in fetchAdminProfiles:', err);
+    } finally {
+      setIsLoadingProfiles(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    fetchAdminProfiles();
+  }, [fetchAdminProfiles]);
+
+  const handleToggleActive = async (profile: AdminProfile) => {
+    const currentActive = profile.is_active !== false;
+    const newStatus = !currentActive;
+    const actionText = newStatus ? 'הפעלת' : 'הקפאת';
+
+    const confirmed = window.confirm(
+      `האם אתה בטוח שברצונך לבצע ${actionText} המוסד "${profile.school_name || profile.institution_code}"?`
+    );
+    if (!confirmed) return;
+
+    setTogglingProfileId(profile.id);
+
+    if (isSupabaseConfigured()) {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('admin_profiles')
+        .update({ is_active: newStatus })
+        .eq('id', profile.id);
+
+      if (error) {
+        console.error('Error updating admin profile is_active:', error);
+        showToast(`שגיאה ב${actionText} המוסד`);
+        setTogglingProfileId(null);
+        return;
+      }
+    }
+
+    // Refresh local React state
+    setProfiles((prev) =>
+      prev.map((p) => (p.id === profile.id ? { ...p, is_active: newStatus } : p))
+    );
+
+    showToast(
+      newStatus
+        ? `מוסד "${profile.school_name || profile.institution_code}" הופעל מחדש בהצלחה!`
+        : `מוסד "${profile.school_name || profile.institution_code}" הוקפא בהצלחה!`
+    );
+    setTogglingProfileId(null);
+  };
 
   const handleCreateSchoolEnvironment = async () => {
     setErrorMessage(null);
@@ -103,6 +206,9 @@ export default function SuperAdminOnboardingPage() {
       setSchoolName('');
       setInstitutionCode('');
       setEmail('');
+
+      // Refresh institutions table
+      void fetchAdminProfiles();
     } catch (err: any) {
       setErrorMessage(
         err?.message || 'שגיאה בלתי צפויה בהקמת סביבת בית הספר.'
@@ -130,7 +236,7 @@ export default function SuperAdminOnboardingPage() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl py-6 space-y-6">
+    <div className="mx-auto max-w-4xl py-6 space-y-6">
       {/* Top Header / Navigation Bar with Back Button */}
       <div className="flex items-center justify-between">
         <Link
@@ -166,11 +272,7 @@ export default function SuperAdminOnboardingPage() {
               הקמת סביבת בית ספר ורישום מנהל חדש
             </h1>
             <p className="mt-1 text-xs sm:text-sm text-slate-500">
-              יצירה אוטומטית של חשבון מנהל ב-Supabase Auth, שיוך לטבלת{' '}
-              <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-semibold text-slate-700">
-                admin_profiles
-              </code>{' '}
-              ושליחת מייל ברוכים הבאים עם סיסמה מאובטחת
+              הקמת סביבה מאובטחת למוסד חינוכי חדש. המערכת תיצור חשבון מנהל, תגדיר הרשאות מתאימות, ותשלח אוטומטית דוא״ל ברוכים הבאים עם פרטי ההתחברות.
             </p>
           </div>
         </div>
@@ -376,6 +478,174 @@ export default function SuperAdminOnboardingPage() {
                 </span>
               </div>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Active Institutions Management (ניהול מוסדות פעילים) */}
+      <div className="glass-modal overflow-hidden p-6 sm:p-8 text-right space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700 shadow-sm">
+              <Building2 className="h-6 w-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold text-slate-900">
+                  ניהול מוסדות פעילים
+                </h2>
+                <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-xs font-bold text-indigo-700">
+                  {profiles.length} מוסדות
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-slate-500">
+                צפייה במוסדות הרשומים, ניהול סטטוס פעילות והקפאת גישה (Soft Delete)
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => fetchAdminProfiles()}
+            disabled={isLoadingProfiles}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-2xs transition hover:bg-slate-50 disabled:opacity-50"
+            title="רענן רשימה"
+          >
+            <RotateCcw
+              className={`h-3.5 w-3.5 text-slate-500 ${
+                isLoadingProfiles ? 'animate-spin' : ''
+              }`}
+            />
+            <span>רענן</span>
+          </button>
+        </div>
+
+        {/* Table of Institutions */}
+        {isLoadingProfiles ? (
+          <div className="flex items-center justify-center py-12 text-slate-400">
+            <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
+            <span className="mr-2 text-xs font-semibold">טוען רשימת מוסדות...</span>
+          </div>
+        ) : profiles.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-8 text-center text-xs text-slate-400">
+            טרם הוקמו מוסדות במערכת. השתמש בטופס שלמעלה להקמת סביבת בית ספר ראשונה.
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-white/70 shadow-2xs">
+            <table className="w-full text-right text-xs">
+              <thead className="border-b border-slate-200/80 bg-slate-50/90 text-[11px] font-bold text-slate-600">
+                <tr>
+                  <th className="px-4 py-3">שם המוסד</th>
+                  <th className="px-4 py-3">סמל מוסד</th>
+                  <th className="px-4 py-3">מנהל/ת</th>
+                  <th className="px-4 py-3">דוא&quot;ל</th>
+                  <th className="px-4 py-3 text-center">סטטוס</th>
+                  <th className="px-4 py-3 text-center">פעולות</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {profiles.map((profile) => {
+                  const isActive = profile.is_active !== false;
+                  return (
+                    <tr
+                      key={profile.id}
+                      className={`transition ${
+                        isActive
+                          ? 'hover:bg-slate-50/80 text-slate-900'
+                          : 'bg-slate-100/70 text-slate-400 opacity-60'
+                      }`}
+                    >
+                      <td className="px-4 py-3.5 font-bold">
+                        <div className="flex items-center gap-2">
+                          <Building2
+                            className={`h-4 w-4 shrink-0 ${
+                              isActive ? 'text-indigo-600' : 'text-slate-400'
+                            }`}
+                          />
+                          <span
+                            className={
+                              isActive
+                                ? 'text-slate-900'
+                                : 'line-through text-slate-400'
+                            }
+                          >
+                            {profile.school_name || 'מוסד חינוכי'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                          {profile.institution_code}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span
+                          className={`font-semibold ${
+                            isActive ? 'text-slate-800' : 'text-slate-400'
+                          }`}
+                        >
+                          {profile.admin_name}
+                        </span>
+                        {profile.id_number && (
+                          <span className="block text-[10px] text-slate-400">
+                            ת&quot;ז: {profile.id_number}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 font-mono text-slate-600">
+                        <span dir="ltr">{profile.email || '—'}</span>
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        {isActive ? (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            פעיל
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-[11px] font-bold text-rose-700">
+                            <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                            מוקפא
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        {isActive ? (
+                          <button
+                            type="button"
+                            disabled={togglingProfileId === profile.id}
+                            onClick={() => handleToggleActive(profile)}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-1.5 text-xs font-bold text-rose-700 shadow-2xs transition hover:bg-rose-100 hover:border-rose-300 disabled:opacity-50"
+                            title="הקפא מוסד"
+                          >
+                            {togglingProfileId === profile.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-rose-600" />
+                            ) : (
+                              <Ban className="h-3.5 w-3.5 text-rose-600" />
+                            )}
+                            <span>הקפא מוסד</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={togglingProfileId === profile.id}
+                            onClick={() => handleToggleActive(profile)}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50/90 px-3 py-1.5 text-xs font-bold text-emerald-800 shadow-2xs transition hover:bg-emerald-100 hover:border-emerald-400 disabled:opacity-50"
+                            title="הפעל מחדש מוסד"
+                          >
+                            {togglingProfileId === profile.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600" />
+                            ) : (
+                              <Play className="h-3.5 w-3.5 text-emerald-600 fill-emerald-600" />
+                            )}
+                            <span>הפעל מחדש</span>
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

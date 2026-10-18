@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import {
   UserCheck,
   KeyRound,
@@ -19,6 +20,9 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
+  Edit3,
+  ShieldCheck,
+  Check,
 } from 'lucide-react';
 import {
   Teacher,
@@ -71,6 +75,7 @@ function TeacherDashboardContent() {
 
   // Self-Service Fixed Schedule Template Editing State
   const [isEditingScheduleOpen, setIsEditingScheduleOpen] = useState<boolean>(false);
+  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [slotDay, setSlotDay] = useState<number>(1);
   const [slotTime, setSlotTime] = useState<string>('09:00');
   const [slotDuration, setSlotDuration] = useState<number>(45);
@@ -78,6 +83,9 @@ function TeacherDashboardContent() {
   const [slotClassName, setSlotClassName] = useState<string>('');
   const [isSavingSlot, setIsSavingSlot] = useState<boolean>(false);
   const [deletingSlotId, setDeletingSlotId] = useState<string | null>(null);
+
+  // Dual-Role Check (Admin switching to Teacher)
+  const [isUserAdmin, setIsUserAdmin] = useState<boolean>(false);
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -98,6 +106,45 @@ function TeacherDashboardContent() {
       setSlotSubject(activeTeacher.subject);
     }
   }, [activeTeacher, slotSubject]);
+
+  // TASK 3: Check if logged-in user is also an Admin in admin_profiles
+  useEffect(() => {
+    const checkAdminProfile = async () => {
+      if (!isSupabaseConfigured()) return;
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        const emailToCheck = user?.email || activeTeacher?.email;
+        if (!emailToCheck) return;
+
+        const { data: profile } = await supabase
+          .from('admin_profiles')
+          .select('id')
+          .ilike('email', emailToCheck.trim())
+          .maybeSingle();
+
+        if (profile) {
+          setIsUserAdmin(true);
+        } else if (user?.id) {
+          const { data: profileById } = await supabase
+            .from('admin_profiles')
+            .select('id')
+            .eq('id', user.id)
+            .maybeSingle();
+          if (profileById) {
+            setIsUserAdmin(true);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not verify admin role:', err);
+      }
+    };
+
+    checkAdminProfile();
+  }, [activeTeacher]);
 
   // Current teacher's fixed schedule slots sorted chronologically
   const teacherFixedSlots = useMemo(() => {
@@ -491,7 +538,26 @@ function TeacherDashboardContent() {
   };
 
   // Self-Service Fixed Schedule Template Management Handlers
-  const handleAddTemplateSlot = async (e: React.FormEvent) => {
+  const handleStartEditSlot = (tpl: ScheduleTemplate) => {
+    setEditingSlotId(tpl.id);
+    setSlotDay(tpl.day_of_week);
+    setSlotTime(normalizeTime(tpl.start_time));
+    setSlotDuration(tpl.duration_minutes);
+    setSlotSubject(tpl.subject);
+    setSlotClassName(tpl.class_name || '');
+    setIsEditingScheduleOpen(true);
+  };
+
+  const handleCancelEditSlot = () => {
+    setEditingSlotId(null);
+    setSlotDay(1);
+    setSlotTime('09:00');
+    setSlotDuration(45);
+    setSlotSubject(activeTeacher?.subject || '');
+    setSlotClassName('');
+  };
+
+  const handleSaveTemplateSlot = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeTeacher) return;
     if (!slotSubject.trim()) {
@@ -510,41 +576,92 @@ function TeacherDashboardContent() {
 
     if (isSupabaseConfigured() && !isUsingFallback) {
       const supabase = createClient();
-      const { data: inserted, error } = await saveScheduleTemplateSafe(supabase, {
-        teacher_id: activeTeacher.id,
-        day_of_week: Number(slotDay),
-        start_time: normalizedStartTime,
-        duration_minutes: Number(slotDuration) || 45,
-        subject: slotSubject.trim(),
-        class_name: slotClassName.trim() || null,
-        institution_code: effectiveCode,
-      });
 
-      if (error || !inserted) {
-        console.error('Error adding schedule slot:', error);
-        showToast('שגיאה בהוספת משבצת שעה למסד הנתונים');
-        setIsSavingSlot(false);
-        return;
+      if (editingSlotId) {
+        // Perform Supabase UPDATE query
+        const { data: updated, error } = await saveScheduleTemplateSafe(supabase, {
+          id: editingSlotId,
+          teacher_id: activeTeacher.id,
+          day_of_week: Number(slotDay),
+          start_time: normalizedStartTime,
+          duration_minutes: Number(slotDuration) || 45,
+          subject: slotSubject.trim(),
+          class_name: slotClassName.trim() || null,
+          institution_code: effectiveCode,
+        });
+
+        if (error || !updated) {
+          console.error('Error updating schedule slot:', error);
+          showToast('שגיאה בעדכון משבצת שעה במסד הנתונים');
+          setIsSavingSlot(false);
+          return;
+        }
+
+        setTemplates((prev) =>
+          prev.map((tpl) => (tpl.id === editingSlotId ? updated : tpl))
+        );
+        showToast('משבצת השעה עודכנה בהצלחה!');
+      } else {
+        // Perform Supabase INSERT query
+        const { data: inserted, error } = await saveScheduleTemplateSafe(supabase, {
+          teacher_id: activeTeacher.id,
+          day_of_week: Number(slotDay),
+          start_time: normalizedStartTime,
+          duration_minutes: Number(slotDuration) || 45,
+          subject: slotSubject.trim(),
+          class_name: slotClassName.trim() || null,
+          institution_code: effectiveCode,
+        });
+
+        if (error || !inserted) {
+          console.error('Error adding schedule slot:', error);
+          showToast('שגיאה בהוספת משבצת שעה למסד הנתונים');
+          setIsSavingSlot(false);
+          return;
+        }
+
+        setTemplates((prev) => [...prev, inserted]);
+        showToast('משבצת השעה נוספה למערכת הקבועה!');
       }
-
-      setTemplates((prev) => [...prev, inserted]);
-      showToast('משבצת השעה נוספה למערכת הקבועה!');
     } else {
-      const localSlot: ScheduleTemplate = {
-        id: `local-tpl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        teacher_id: activeTeacher.id,
-        day_of_week: Number(slotDay),
-        start_time: normalizedStartTime,
-        duration_minutes: Number(slotDuration) || 45,
-        subject: slotSubject.trim(),
-        class_name: slotClassName.trim() || null,
-        institution_code: effectiveCode,
-      };
-      setTemplates((prev) => [...prev, localSlot]);
-      showToast('משבצת השעה נוספה למערכת הקבועה!');
+      // Fallback / Demo Mode
+      if (editingSlotId) {
+        setTemplates((prev) =>
+          prev.map((tpl) =>
+            tpl.id === editingSlotId
+              ? {
+                  ...tpl,
+                  day_of_week: Number(slotDay),
+                  start_time: normalizedStartTime,
+                  duration_minutes: Number(slotDuration) || 45,
+                  subject: slotSubject.trim(),
+                  class_name: slotClassName.trim() || null,
+                  institution_code: effectiveCode,
+                }
+              : tpl
+          )
+        );
+        showToast('משבצת השעה עודכנה בהצלחה!');
+      } else {
+        const localSlot: ScheduleTemplate = {
+          id: `local-tpl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          teacher_id: activeTeacher.id,
+          day_of_week: Number(slotDay),
+          start_time: normalizedStartTime,
+          duration_minutes: Number(slotDuration) || 45,
+          subject: slotSubject.trim(),
+          class_name: slotClassName.trim() || null,
+          institution_code: effectiveCode,
+        };
+        setTemplates((prev) => [...prev, localSlot]);
+        showToast('משבצת השעה נוספה למערכת הקבועה!');
+      }
     }
 
+    // Reset state on success
+    setEditingSlotId(null);
     setSlotClassName('');
+    setSlotSubject(activeTeacher.subject || '');
     setIsSavingSlot(false);
   };
 
@@ -676,8 +793,19 @@ function TeacherDashboardContent() {
           </div>
         </div>
 
-        {/* Week Selector */}
+        {/* Week Selector and Dual-Role Actions */}
         <div className="flex flex-wrap items-center gap-3">
+          {isUserAdmin && (
+            <Link
+              href="/admin"
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-l from-indigo-600 to-sky-600 px-4 py-2 text-xs sm:text-sm font-bold text-white shadow-md shadow-indigo-600/20 transition hover:from-indigo-700 hover:to-sky-700"
+              title="חזרה לממשק ניהול בית הספר"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              <span>חזרה לממשק מנהל</span>
+            </Link>
+          )}
+
           <div className="flex items-center gap-1 rounded-xl border border-slate-200/90 bg-white/90 p-1 shadow-sm">
             <button
               type="button"
@@ -764,14 +892,23 @@ function TeacherDashboardContent() {
         {/* Collapsible Content */}
         {isEditingScheduleOpen && (
           <div className="mt-5 border-t border-slate-100 pt-5 space-y-6">
-            {/* Create Slot Form */}
+            {/* Create / Edit Slot Form */}
             <form
-              onSubmit={handleAddTemplateSlot}
+              onSubmit={handleSaveTemplateSlot}
               className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4"
             >
               <h3 className="mb-3 flex items-center gap-2 text-xs font-bold text-sky-950">
-                <Plus className="h-4 w-4 text-sky-600" />
-                <span>הוספת משבצת שעה קבועה חדשה</span>
+                {editingSlotId ? (
+                  <>
+                    <Edit3 className="h-4 w-4 text-sky-600" />
+                    <span>עריכת משבצת שעה קבועה</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 text-sky-600" />
+                    <span>הוספת משבצת שעה קבועה חדשה</span>
+                  </>
+                )}
               </h3>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-5">
@@ -854,7 +991,16 @@ function TeacherDashboardContent() {
                 </div>
               </div>
 
-              <div className="mt-3.5 flex justify-end">
+              <div className="mt-3.5 flex items-center justify-end gap-2">
+                {editingSlotId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEditSlot}
+                    className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-600 shadow-2xs transition hover:bg-slate-100"
+                  >
+                    ביטול
+                  </button>
+                )}
                 <button
                   type="submit"
                   disabled={isSavingSlot}
@@ -862,10 +1008,18 @@ function TeacherDashboardContent() {
                 >
                   {isSavingSlot ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : editingSlotId ? (
+                    <Check className="h-3.5 w-3.5" />
                   ) : (
                     <Plus className="h-3.5 w-3.5" />
                   )}
-                  <span>{isSavingSlot ? 'שומר משבצת...' : 'הוסף משבצת למערכת'}</span>
+                  <span>
+                    {isSavingSlot
+                      ? 'שומר...'
+                      : editingSlotId
+                      ? 'שמור שינויים'
+                      : 'הוסף משבצת למערכת'}
+                  </span>
                 </button>
               </div>
             </form>
@@ -885,7 +1039,11 @@ function TeacherDashboardContent() {
                   {teacherFixedSlots.map((tpl) => (
                     <div
                       key={tpl.id}
-                      className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-2xs transition hover:border-sky-200"
+                      className={`flex items-center justify-between rounded-xl border p-3 shadow-2xs transition hover:border-sky-200 ${
+                        editingSlotId === tpl.id
+                          ? 'border-sky-500 bg-sky-50/40 ring-2 ring-sky-500/20'
+                          : 'border-slate-200 bg-white'
+                      }`}
                     >
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
@@ -913,20 +1071,31 @@ function TeacherDashboardContent() {
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        disabled={deletingSlotId === tpl.id}
-                        onClick={() => handleDeleteTemplateSlot(tpl.id)}
-                        className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
-                        title="מחק משבצת שעה זו"
-                        aria-label="מחק משבצת"
-                      >
-                        {deletingSlotId === tpl.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin text-rose-500" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditSlot(tpl)}
+                          className="rounded-lg p-2 text-slate-400 transition hover:bg-sky-50 hover:text-sky-600"
+                          title="ערוך משבצת שעה זו"
+                          aria-label="ערוך משבצת"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deletingSlotId === tpl.id}
+                          onClick={() => handleDeleteTemplateSlot(tpl.id)}
+                          className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                          title="מחק משבצת שעה זו"
+                          aria-label="מחק משבצת"
+                        >
+                          {deletingSlotId === tpl.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-rose-500" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>

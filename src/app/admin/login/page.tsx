@@ -40,7 +40,10 @@ function AdminLoginContent() {
     if (isResetModeFromQuery) {
       setIsRecoveryMode(true);
     }
-  }, [isResetModeFromQuery]);
+    if (searchParams.get('error') === 'account_frozen') {
+      setErrorMessage('הגישה למערכת הוקפאה. אנא פנה להנהלה.');
+    }
+  }, [isResetModeFromQuery, searchParams]);
 
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
@@ -78,7 +81,7 @@ function AdminLoginContent() {
     setLoadingAction('password');
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data: authData, error } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password,
       });
@@ -90,6 +93,21 @@ function AdminLoginContent() {
             : `שגיאת התחברות: ${error.message}`
         );
         return;
+      }
+
+      // TASK 2: Block login if account is frozen (is_active is false)
+      if (authData?.user?.id) {
+        const { data: profile } = await supabase
+          .from('admin_profiles')
+          .select('is_active')
+          .eq('id', authData.user.id)
+          .maybeSingle();
+
+        if (profile && profile.is_active === false) {
+          await supabase.auth.signOut();
+          setErrorMessage('הגישה למערכת הוקפאה. אנא פנה להנהלה.');
+          return;
+        }
       }
 
       setSuccessMessage('התחברת בהצלחה! מעביר ללוח הבקרה...');

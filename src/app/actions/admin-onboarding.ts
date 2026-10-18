@@ -317,15 +317,34 @@ export async function registerNewSchoolAdmin(
     }
 
     // 1. Insert into `public.admin_profiles`
-    const { error: profileError } = await supabaseClient
+    const profilePayload: Record<string, any> = {
+      id: createdUserId,
+      admin_name: adminName,
+      id_number: idNumber,
+      school_name: schoolName,
+      institution_code: institutionCode,
+      is_active: true,
+      email,
+    };
+
+    let { error: profileError } = await supabaseClient
       .from('admin_profiles')
-      .insert({
+      .insert(profilePayload);
+
+    if (profileError) {
+      const fallbackPayload = {
         id: createdUserId,
         admin_name: adminName,
         id_number: idNumber,
         school_name: schoolName,
         institution_code: institutionCode,
-      });
+        is_active: true,
+      };
+      const { error: fbErr } = await supabaseClient
+        .from('admin_profiles')
+        .insert(fallbackPayload);
+      profileError = fbErr;
+    }
 
     if (profileError) {
       console.warn(

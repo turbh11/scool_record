@@ -7,6 +7,8 @@ export interface AdminProfile {
   school_name: string;
   institution_code: string;
   created_at: string;
+  email?: string;
+  is_active?: boolean;
 }
 
 export interface School {
