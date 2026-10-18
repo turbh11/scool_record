@@ -20,6 +20,7 @@ import {
   Send,
   Loader2,
   Users,
+  KeyRound,
 } from 'lucide-react';
 import {
   School,
@@ -65,6 +66,7 @@ import KpiCards from '@/components/admin/KpiCards';
 import WeeklyTimeGrid from '@/components/admin/WeeklyTimeGrid';
 import StatusOverrideModal from '@/components/admin/StatusOverrideModal';
 import SchoolSettingsModal from '@/components/admin/SchoolSettingsModal';
+import ChangePasswordModal from '@/components/admin/ChangePasswordModal';
 import TeacherScheduleModal, {
   TeacherFormPayload,
 } from '@/components/admin/TeacherScheduleModal';
@@ -103,6 +105,8 @@ export default function AdminDashboardPage() {
   const [isSavingOverride, setIsSavingOverride] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] =
+    useState<boolean>(false);
   const [isManageTeachersOpen, setIsManageTeachersOpen] =
     useState<boolean>(false);
   const [isSeeding, setIsSeeding] = useState<boolean>(false);
@@ -1616,6 +1620,16 @@ export default function AdminDashboardPage() {
               <span>הגדרות מוסד</span>
             </button> 
 
+            <button
+              type="button"
+              onClick={() => setIsChangePasswordOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs sm:text-sm font-semibold text-slate-700 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/50 hover:text-indigo-700"
+              title="החלפת סיסמת כניסה למנהל"
+            >
+              <KeyRound className="h-4 w-4 text-indigo-600" />
+              <span>החלפת סיסמה</span>
+            </button> 
+
             <AdminHeader
               schoolName={school?.name}
               institutionCode={adminInstitutionCode || school?.semel_mosad}
@@ -1811,6 +1825,13 @@ export default function AdminDashboardPage() {
         isSaving={isSavingSettings}
         onClose={() => setIsSettingsOpen(false)}
         onSaveSettings={handleSaveSchoolSettings}
+      />
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+        onShowToast={showToast}
       />
 
       {/* Teacher & Schedule Management Modal */}
