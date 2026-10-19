@@ -321,27 +321,30 @@ export async function registerNewSchoolAdmin(
     }
 
     // 1. Insert into `public.admin_profiles`
+    const normalizedEmail = email.trim().toLowerCase();
     const profilePayload: Record<string, any> = {
       id: createdUserId,
-      admin_name: adminName,
-      id_number: idNumber,
-      school_name: schoolName,
-      institution_code: institutionCode,
+      admin_name: adminName.trim(),
+      id_number: idNumber.trim(),
+      school_name: schoolName.trim(),
+      institution_code: institutionCode.trim(),
       is_active: true,
-      email,
+      email: normalizedEmail,
     };
 
     let { error: profileError } = await supabaseClient
       .from('admin_profiles')
       .insert(profilePayload);
 
-    if (profileError) {
+    // If initial insert fails because email column might be missing in a legacy table schema,
+    // fallback to payload without email, but log clear notice
+    if (profileError && profileError.message?.includes('email')) {
       const fallbackPayload = {
         id: createdUserId,
-        admin_name: adminName,
-        id_number: idNumber,
-        school_name: schoolName,
-        institution_code: institutionCode,
+        admin_name: adminName.trim(),
+        id_number: idNumber.trim(),
+        school_name: schoolName.trim(),
+        institution_code: institutionCode.trim(),
         is_active: true,
       };
       const { error: fbErr } = await supabaseClient
@@ -368,8 +371,8 @@ export async function registerNewSchoolAdmin(
       const { error: schoolError } = await supabaseClient
         .from('schools')
         .insert({
-          name: schoolName,
-          semel_mosad: institutionCode,
+          name: schoolName.trim(),
+          semel_mosad: institutionCode.trim(),
           admin_user_id: createdUserId,
         });
 
@@ -378,12 +381,17 @@ export async function registerNewSchoolAdmin(
       }
     }
 
-    // 3. Automatically generate Magic Link and send onboarding email completely in the background
+    // 3. Automatically generate Magic Link and send onboarding email with initial password in the background
     let emailSent = false;
     try {
-      const linkRes = await generateAdminLoginLink(email, cleanOrigin);
+      const linkRes = await generateAdminLoginLink(normalizedEmail, cleanOrigin);
       if (linkRes.success && linkRes.link) {
-        const mailRes = await sendMagicLinkEmail(email, linkRes.link, schoolName);
+        const mailRes = await sendMagicLinkEmail(
+          normalizedEmail,
+          linkRes.link,
+          schoolName.trim(),
+          generatedPassword
+        );
         emailSent = Boolean(mailRes.success);
       }
     } catch (mailErr) {

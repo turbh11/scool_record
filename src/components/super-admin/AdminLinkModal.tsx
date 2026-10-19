@@ -43,7 +43,12 @@ export default function AdminLinkModal({
   const [isSendingEmail, setIsSendingEmail] = useState<boolean>(false);
 
   const fetchLink = useCallback(async () => {
-    if (!admin?.email) return;
+    if (!admin?.email || !admin.email.trim()) {
+      setError('שגיאה: לא ניתן להפיק קישור מכיוון שכתובת הדוא״ל חסרה או שגויה.');
+      setLink('');
+      setIsLoading(false);
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -53,7 +58,7 @@ export default function AdminLinkModal({
     try {
       const origin =
         typeof window !== 'undefined' ? window.location.origin : undefined;
-      const res = await generateAdminLoginLink(admin.email, origin);
+      const res = await generateAdminLoginLink(admin.email.trim(), origin);
 
       if (res.success && res.link) {
         setLink(res.link);
@@ -69,8 +74,14 @@ export default function AdminLinkModal({
   }, [admin?.email]);
 
   useEffect(() => {
-    if (isOpen && admin?.email) {
-      fetchLink();
+    if (isOpen) {
+      if (!admin?.email || !admin.email.trim()) {
+        setError('שגיאה: לא ניתן להפיק קישור מכיוון שכתובת הדוא״ל חסרה או שגויה.');
+        setLink('');
+        setIsLoading(false);
+      } else {
+        fetchLink();
+      }
     } else {
       setLink('');
       setError(null);
@@ -81,8 +92,10 @@ export default function AdminLinkModal({
 
   if (!isOpen || !admin) return null;
 
+  const isActionDisabled = !link || !admin?.email || !admin.email.trim();
+
   const handleCopy = () => {
-    if (!link) return;
+    if (isActionDisabled) return;
     navigator.clipboard.writeText(link);
     setCopied(true);
     onShowToast?.(`קישור ההתחברות עבור ${admin.name} הועתק ללוח!`);
@@ -90,7 +103,7 @@ export default function AdminLinkModal({
   };
 
   const handleWhatsApp = () => {
-    if (!link) return;
+    if (isActionDisabled) return;
     const msg = `שלום ${admin.name}, מצורף קישור התחברות מאובטח לממשק הניהול של ${admin.school}: ${link}`;
     const waUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
     window.open(waUrl, '_blank', 'noopener,noreferrer');
@@ -98,7 +111,7 @@ export default function AdminLinkModal({
   };
 
   const handleSendEmail = async () => {
-    if (!link || !admin?.email) return;
+    if (isActionDisabled) return;
     setIsSendingEmail(true);
     try {
       const res = await sendMagicLinkEmail(admin.email, link, admin.school);
@@ -155,22 +168,26 @@ export default function AdminLinkModal({
                 מייצר קישור התחברות מאובטח (Magic Link)...
               </p>
             </div>
-          ) : error ? (
-            <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-4 space-y-3">
-              <div className="flex items-start gap-2 text-rose-800 text-xs">
-                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-rose-600" />
-                <span>{error}</span>
-              </div>
-              <button
-                type="button"
-                onClick={fetchLink}
-                className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700 transition"
-              >
-                נסה שוב
-              </button>
-            </div>
           ) : (
             <>
+              {error && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50/80 p-4 space-y-2.5">
+                  <div className="flex items-start gap-2.5 text-rose-800 text-xs">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-rose-600" />
+                    <span className="font-semibold leading-relaxed">{error}</span>
+                  </div>
+                  {admin?.email && (
+                    <button
+                      type="button"
+                      onClick={fetchLink}
+                      className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700 transition"
+                    >
+                      נסה שוב
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div>
                 <p className="text-xs text-slate-600 leading-relaxed">
                   קישור התחברות ישיר (Magic Link) לממשק ניהול בית הספר. הקישור מאפשר כניסה מיידית ומאובטחת למערכת ללא צורך בהזנת סיסמה.
@@ -188,8 +205,19 @@ export default function AdminLinkModal({
                     readOnly
                     dir="ltr"
                     value={link}
-                    onClick={(e) => (e.target as HTMLInputElement).select()}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-mono text-slate-800 outline-none select-all focus:border-indigo-500 focus:bg-white"
+                    placeholder={
+                      isActionDisabled
+                        ? 'לא הופק קישור (כתובת דוא״ל חסרה)'
+                        : 'קישור התחברות'
+                    }
+                    onClick={(e) => {
+                      if (link) (e.target as HTMLInputElement).select();
+                    }}
+                    className={`w-full rounded-xl border px-3 py-2 text-xs font-mono outline-none transition ${
+                      isActionDisabled
+                        ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                        : 'border-slate-200 bg-slate-50 text-slate-800 select-all focus:border-indigo-500 focus:bg-white'
+                    }`}
                   />
                 </div>
               </div>
@@ -203,9 +231,14 @@ export default function AdminLinkModal({
                   {/* Copy Link */}
                   <button
                     type="button"
+                    disabled={isActionDisabled}
                     onClick={handleCopy}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50 hover:border-slate-300"
-                    title="העתק קישור ללוח"
+                    className={`inline-flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-bold shadow-2xs transition ${
+                      isActionDisabled
+                        ? 'border-slate-200 bg-slate-100 text-slate-400 opacity-60 cursor-not-allowed'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+                    }`}
+                    title={isActionDisabled ? 'קישור אינו זמין להעתקה' : 'העתק קישור ללוח'}
                   >
                     {copied ? (
                       <Check className="h-4 w-4 text-emerald-600" />
@@ -218,9 +251,14 @@ export default function AdminLinkModal({
                   {/* WhatsApp */}
                   <button
                     type="button"
+                    disabled={isActionDisabled}
                     onClick={handleWhatsApp}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-800 shadow-2xs transition hover:bg-emerald-100 hover:border-emerald-300"
-                    title="שלח קישור בוואטסאפ"
+                    className={`inline-flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-bold shadow-2xs transition ${
+                      isActionDisabled
+                        ? 'border-slate-200 bg-slate-100 text-slate-400 opacity-60 cursor-not-allowed'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:border-emerald-300'
+                    }`}
+                    title={isActionDisabled ? 'קישור אינו זמין לשליחה בוואטסאפ' : 'שלח קישור בוואטסאפ'}
                   >
                     <MessageCircle className="h-4 w-4 text-emerald-600" />
                     <span>וואטסאפ</span>
@@ -229,10 +267,14 @@ export default function AdminLinkModal({
                   {/* Email */}
                   <button
                     type="button"
-                    disabled={isSendingEmail || !link}
+                    disabled={isActionDisabled || isSendingEmail}
                     onClick={handleSendEmail}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs font-bold text-sky-800 shadow-2xs transition hover:bg-sky-100 hover:border-sky-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={`שלח דוא״ל אל ${admin.email}`}
+                    className={`inline-flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-bold shadow-2xs transition ${
+                      isActionDisabled
+                        ? 'border-slate-200 bg-slate-100 text-slate-400 opacity-60 cursor-not-allowed'
+                        : 'border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100 hover:border-sky-300'
+                    }`}
+                    title={isActionDisabled ? 'קישור או דוא״ל אינם זמינים לשליחה' : `שלח דוא״ל אל ${admin.email || ''}`}
                   >
                     {isSendingEmail ? (
                       <Loader2 className="h-4 w-4 animate-spin text-sky-600" />

@@ -20,6 +20,7 @@ import {
   Ban,
   RotateCcw,
   Link2,
+  Pencil,
 } from 'lucide-react';
 import { registerNewSchoolAdmin } from '@/app/actions/admin-onboarding';
 import {
@@ -31,6 +32,7 @@ import { AdminProfile } from '@/types/database';
 import AdminLinkModal, {
   AdminDetails,
 } from '@/components/super-admin/AdminLinkModal';
+import EditInstitutionModal from '@/components/super-admin/EditInstitutionModal';
 
 interface CreatedAdminSummary {
   adminName: string;
@@ -67,6 +69,7 @@ export default function SuperAdminOnboardingPage() {
   const [togglingProfileId, setTogglingProfileId] = useState<string | null>(null);
   const [selectedAdminForLink, setSelectedAdminForLink] =
     useState<AdminDetails | null>(null);
+  const [editingProfile, setEditingProfile] = useState<AdminProfile | null>(null);
 
   const fetchAdminProfiles = useCallback(async () => {
     if (!isSupabaseConfigured()) {
@@ -645,6 +648,17 @@ export default function SuperAdminOnboardingPage() {
                             <span>שלח קישור התחברות</span>
                           </button>
 
+                          {/* Edit Button */}
+                          <button
+                            type="button"
+                            onClick={() => setEditingProfile(profile)}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50 hover:border-slate-300"
+                            title="ערוך פרטי מוסד"
+                          >
+                            <Pencil className="h-3.5 w-3.5 text-slate-500" />
+                            <span>ערוך</span>
+                          </button>
+
                           {isActive ? (
                             <button
                               type="button"
@@ -692,6 +706,15 @@ export default function SuperAdminOnboardingPage() {
         isOpen={selectedAdminForLink !== null}
         onClose={() => setSelectedAdminForLink(null)}
         admin={selectedAdminForLink}
+        onShowToast={showToast}
+      />
+
+      {/* Edit Institution Profile Modal */}
+      <EditInstitutionModal
+        isOpen={editingProfile !== null}
+        onClose={() => setEditingProfile(null)}
+        institution={editingProfile}
+        onSuccess={fetchAdminProfiles}
         onShowToast={showToast}
       />
     </div>

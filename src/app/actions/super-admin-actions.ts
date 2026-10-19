@@ -112,7 +112,40 @@ export async function getActiveInstitutions(): Promise<GetActiveInstitutionsResu
       };
     }
 
-    return { success: true, data: (data || []) as AdminProfile[] };
+    const profilesList = (data || []) as AdminProfile[];
+
+    // If any profiles lack email, automatically hydrate from auth.users and backfill
+    const missingEmailProfiles = profilesList.filter((p) => !p.email);
+    if (missingEmailProfiles.length > 0) {
+      try {
+        const { data: usersData } = await supabaseAdmin.auth.admin.listUsers({
+          perPage: 1000,
+        });
+        if (usersData?.users && usersData.users.length > 0) {
+          const userMap = new Map<string, string>(
+            usersData.users.map((u) => [u.id, u.email || ''])
+          );
+
+          for (const p of profilesList) {
+            if (!p.email && userMap.has(p.id)) {
+              const discoveredEmail = userMap.get(p.id);
+              if (discoveredEmail) {
+                p.email = discoveredEmail;
+                // Backfill into admin_profiles in background
+                void supabaseAdmin
+                  .from('admin_profiles')
+                  .update({ email: discoveredEmail })
+                  .eq('id', p.id);
+              }
+            }
+          }
+        }
+      } catch (authErr) {
+        console.warn('[getActiveInstitutions] Auth email hydration skipped:', authErr);
+      }
+    }
+
+    return { success: true, data: profilesList };
   } catch (err: any) {
     console.error('[getActiveInstitutions] Unexpected error:', err);
     return {
@@ -174,6 +207,110 @@ export async function toggleInstitutionActive(
     return {
       success: false,
       error: err?.message || 'שגיאה בעדכון סטטוס מוסד',
+    };
+  }
+}
+
+/**
+ * Payload interface for editing an institution profile
+ */
+export interface UpdateInstitutionProfilePayload {
+  school_name: string;
+  admin_name: string;
+  institution_code: string;
+}
+
+/**
+ * Server Action: Updates institution profile fields (school_name, admin_name, institution_code).
+ * Email cannot be changed to prevent Supabase Auth identity mismatches.
+ */
+export async function updateInstitutionProfile(
+  id: string,
+  payload: UpdateInstitutionProfilePayload
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const cleanId = id?.trim();
+    const schoolName = payload.school_name?.trim();
+    const adminName = payload.admin_name?.trim();
+    const institutionCode = payload.institution_code?.trim();
+
+    if (!cleanId) {
+      return { success: false, error: 'מזהה מוסד חסר' };
+    }
+    if (!schoolName || !adminName || !institutionCode) {
+      return {
+        success: false,
+        error: 'נא למלא את כל השדות (שם בית ספר, שם מנהל וסמל מוסד).',
+      };
+    }
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+
+    if (!supabaseUrl || !serviceRoleKey) {
+      return {
+        success: false,
+        error: 'משתנה סביבה SUPABASE_SERVICE_ROLE_KEY אינו מוגדר בשרת.',
+      };
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+
+    let { error: profileError } = await supabaseAdmin
+      .from('admin_profiles')
+      .update({
+        school_name: schoolName,
+        admin_name: adminName,
+        institution_code: institutionCode,
+      })
+      .eq('id', cleanId);
+
+    if (
+      profileError &&
+      (profileError.code === '42501' || profileError.message?.includes('permission denied'))
+    ) {
+      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+      if (anonKey) {
+        const fallbackClient = createClient(supabaseUrl, anonKey);
+        const fbRes = await fallbackClient
+          .from('admin_profiles')
+          .update({
+            school_name: schoolName,
+            admin_name: adminName,
+            institution_code: institutionCode,
+          })
+          .eq('id', cleanId);
+        profileError = fbRes.error;
+      }
+    }
+
+    if (profileError) {
+      console.error('[updateInstitutionProfile] DB Error:', profileError);
+      return {
+        success: false,
+        error: profileError.message || 'שגיאה בעדכון פרטי המוסד',
+      };
+    }
+
+    // Also update corresponding row in public.schools if linked
+    try {
+      await supabaseAdmin
+        .from('schools')
+        .update({
+          name: schoolName,
+          semel_mosad: institutionCode,
+        })
+        .eq('admin_user_id', cleanId);
+    } catch (schoolErr) {
+      console.warn('[updateInstitutionProfile] Non-critical school update warning:', schoolErr);
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('[updateInstitutionProfile] Unexpected error:', err);
+    return {
+      success: false,
+      error: err?.message || 'שגיאה בלתי צפויה בעדכון פרטי המוסד',
     };
   }
 }
@@ -261,11 +398,13 @@ export async function generateAdminLoginLink(
 
 /**
  * Server Action: Sends a Magic Link login email to an admin using Nodemailer.
+ * If initialPassword is provided, includes a styled credentials block with username & password.
  */
 export async function sendMagicLinkEmail(
   email: string,
   actionLink: string,
-  schoolName?: string
+  schoolName?: string,
+  initialPassword?: string
 ): Promise<SendMagicLinkEmailResult> {
   try {
     const cleanEmail = email?.trim().toLowerCase();
@@ -277,6 +416,30 @@ export async function sendMagicLinkEmail(
 
     const schoolLabel = schoolName ? ` - ${schoolName}` : '';
     const subject = `קישור התחברות למערכת דיווח שעות פרטניות${schoolLabel}`;
+
+    const credentialsBlock = initialPassword
+      ? `
+        <!-- Credentials Box -->
+        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 14px; padding: 18px 22px; margin: 24px 0; text-align: right;">
+          <p style="margin: 0 0 10px 0; font-size: 13px; font-weight: 700; color: #1e293b;">
+            פרטי התחברות קבועים למערכת (שם משתמש וסיסמה):
+          </p>
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="4" border="0" dir="rtl" style="font-size: 13px; color: #334155;">
+            <tr>
+              <td style="font-weight: 600; width: 140px; color: #64748b;">שם משתמש (דוא״ל):</td>
+              <td dir="ltr" style="font-family: monospace, sans-serif; font-weight: 700; color: #0f172a; text-align: right;">${cleanEmail}</td>
+            </tr>
+            <tr>
+              <td style="font-weight: 600; width: 140px; color: #64748b;">סיסמה ראשונית:</td>
+              <td dir="ltr" style="font-family: monospace, sans-serif; font-weight: 700; color: #4f46e5; background-color: #eef2ff; padding: 3px 8px; border-radius: 6px; display: inline-block; text-align: right;">${initialPassword}</td>
+            </tr>
+          </table>
+          <p style="margin: 12px 0 0 0; font-size: 12px; color: #64748b; line-height: 1.5;">
+            מומלץ לשנות את הסיסמה באזור האישי לאחר ההתחברות הראשונה.
+          </p>
+        </div>
+      `
+      : '';
 
     const html = `
 <!DOCTYPE html>
@@ -315,6 +478,8 @@ export async function sendMagicLinkEmail(
                   כניסה ישירה למערכת
                 </a>
               </div>
+
+              ${credentialsBlock}
 
               <!-- Fallback Link URL -->
               <div style="background-color:#f8fafc;border-radius:12px;border:1px solid #e2e8f0;padding:16px;margin:24px 0;">

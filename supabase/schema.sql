@@ -82,11 +82,13 @@ CREATE TABLE IF NOT EXISTS public.admin_profiles (
     id_number TEXT NOT NULL,
     school_name TEXT NOT NULL,
     institution_code TEXT NOT NULL,
+    email TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     is_active BOOLEAN NOT NULL DEFAULT true
 );
 
 ALTER TABLE public.admin_profiles ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE public.admin_profiles ADD COLUMN IF NOT EXISTS email TEXT;
 
 -- 7. Multi-Tenant isolation key: `institution_code` (סמל מוסד) on every tenant-owned table
 ALTER TABLE public.teachers ADD COLUMN IF NOT EXISTS institution_code TEXT;
