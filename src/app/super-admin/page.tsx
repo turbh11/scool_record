@@ -26,7 +26,7 @@ import {
   getActiveInstitutions,
   toggleInstitutionActive,
 } from '@/app/actions/super-admin-actions';
-import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import { isSupabaseConfigured } from '@/lib/supabase/client';
 import { AdminProfile } from '@/types/database';
 import AdminLinkModal, {
   AdminDetails,
@@ -107,9 +107,9 @@ export default function SuperAdminOnboardingPage() {
       }
 
       setProfiles((res.data || []) as AdminProfile[]);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error in fetchAdminProfiles:', err);
-      showToast('שגיאה בלתי צפויה בטעינת רשימת המוסדות');
+      showToast(err?.message || 'שגיאה בלתי צפויה בטעינת רשימת המוסדות');
     } finally {
       setIsLoadingProfiles(false);
     }
@@ -131,15 +131,13 @@ export default function SuperAdminOnboardingPage() {
 
     setTogglingProfileId(profile.id);
 
-    if (isSupabaseConfigured()) {
-      const res = await toggleInstitutionActive(profile.id, newStatus);
+    const res = await toggleInstitutionActive(profile.id, newStatus);
 
-      if (!res.success) {
-        console.error('Error updating admin profile is_active:', res.error);
-        showToast(res.error || `שגיאה ב${actionText} המוסד`);
-        setTogglingProfileId(null);
-        return;
-      }
+    if (!res.success) {
+      console.error('Error updating admin profile is_active:', res.error);
+      showToast(res.error || `שגיאה ב${actionText} המוסד`);
+      setTogglingProfileId(null);
+      return;
     }
 
     // Refresh local React state

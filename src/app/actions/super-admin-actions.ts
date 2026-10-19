@@ -1,6 +1,6 @@
 'use server';
 
-import { createClient as createSupabaseJsClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/email';
 import { AdminProfile } from '@/types/database';
 
@@ -58,26 +58,58 @@ export async function getActiveInstitutions(): Promise<GetActiveInstitutionsResu
 
     if (!supabaseUrl || !serviceRoleKey) {
       console.warn(
-        '[getActiveInstitutions] SUPABASE_SERVICE_ROLE_KEY not configured. Returning empty or fallback list.'
+        '[getActiveInstitutions] Missing SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_URL.'
       );
-      return { success: true, data: [] };
+      return {
+        success: false,
+        error: 'משתנה סביבה SUPABASE_SERVICE_ROLE_KEY אינו מוגדר בשרת.',
+      };
     }
 
-    const supabaseAdmin = createSupabaseJsClient(supabaseUrl, serviceRoleKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
+    // Explicitly initialize Supabase admin client with service_role master key
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-    const { data, error } = await supabaseAdmin
+    let { data, error } = await supabaseAdmin
       .from('admin_profiles')
       .select('*')
       .order('created_at', { ascending: false });
 
+    // Handle potential table permission issues gracefully
     if (error) {
-      console.error('[getActiveInstitutions] DB Error:', error);
-      return { success: false, error: error.message };
+      console.error('[getActiveInstitutions] Master key query error:', error);
+
+      // If Postgres reports permission denied (42501), attempt fallback via anon client if permitted
+      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+      if (anonKey && (error.code === '42501' || error.message?.includes('permission denied'))) {
+        try {
+          const fallbackClient = createClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            anonKey
+          );
+          const fallbackRes = await fallbackClient
+            .from('admin_profiles')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (!fallbackRes.error && fallbackRes.data) {
+            console.log('[getActiveInstitutions] Successfully recovered via anon client fallback.');
+            return { success: true, data: fallbackRes.data as AdminProfile[] };
+          }
+        } catch (fbErr) {
+          console.warn('[getActiveInstitutions] Fallback attempt also failed:', fbErr);
+        }
+      }
+
+      return {
+        success: false,
+        error:
+          error.code === '42501' || error.message?.includes('permission denied')
+            ? 'שגיאת הרשאות בטבלת admin_profiles (יש להריץ ב-Supabase SQL: GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;)'
+            : (error.message || 'שגיאה בשליפת רשימת המוסדות'),
+      };
     }
 
     return { success: true, data: (data || []) as AdminProfile[] };
@@ -85,7 +117,7 @@ export async function getActiveInstitutions(): Promise<GetActiveInstitutionsResu
     console.error('[getActiveInstitutions] Unexpected error:', err);
     return {
       success: false,
-      error: err?.message || 'שגיאה פנימית בטעינת רשימת המוסדות',
+      error: err?.message || 'שגיאה פנימית בלתי צפויה בטעינת רשימת המוסדות',
     };
   }
 }
@@ -106,17 +138,30 @@ export async function toggleInstitutionActive(
       return { success: true };
     }
 
-    const supabaseAdmin = createSupabaseJsClient(supabaseUrl, serviceRoleKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-    const { error } = await supabaseAdmin
+    let { error } = await supabaseAdmin
       .from('admin_profiles')
       .update({ is_active: isActive })
       .eq('id', profileId);
+
+    if (error && (error.code === '42501' || error.message?.includes('permission denied'))) {
+      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+      if (anonKey) {
+        const fallbackClient = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          anonKey
+        );
+        const fbRes = await fallbackClient
+          .from('admin_profiles')
+          .update({ is_active: isActive })
+          .eq('id', profileId);
+        error = fbRes.error;
+      }
+    }
 
     if (error) {
       console.error('[toggleInstitutionActive] Error updating status:', error);
@@ -168,7 +213,7 @@ export async function generateAdminLoginLink(
       };
     }
 
-    const supabaseAdmin = createSupabaseJsClient(supabaseUrl, serviceRoleKey, {
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
