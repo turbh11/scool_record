@@ -142,28 +142,23 @@ function buildAdminWelcomeEmailHtml(params: {
               </p>
 
               <!-- Credentials Box -->
-              <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 16px; padding: 20px 24px; margin: 0 0 24px 0;">
-                <p style="margin: 0 0 12px 0; font-size: 14px; font-weight: 700; color: #1e293b;">
+              <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 16px; padding: 22px 24px; margin: 0 0 24px 0; text-align: right;">
+                <p style="margin: 0 0 14px 0; font-size: 14px; font-weight: 700; color: #1e293b;">
                   פרטי ההתחברות האישיים שלך לממשק ההנהלה:
                 </p>
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="6" border="0" dir="rtl" style="font-size: 14px; color: #334155;">
-                  <tr>
-                    <td style="font-weight: 600; width: 130px; color: #64748b;">שם משתמש (דוא"ל):</td>
-                    <td dir="ltr" style="font-family: monospace, sans-serif; font-weight: 700; color: #0f172a; text-align: right;">${email}</td>
-                  </tr>
-                  <tr>
-                    <td style="font-weight: 600; width: 130px; color: #64748b;">סיסמה ראשונית:</td>
-                    <td dir="ltr" style="font-family: monospace, sans-serif; font-weight: 700; color: #4f46e5; background-color: #eef2ff; padding: 4px 10px; border-radius: 8px; display: inline-block; text-align: right;">${password}</td>
-                  </tr>
-                  <tr>
-                    <td style="font-weight: 600; width: 130px; color: #64748b;">קישור להתחברות:</td>
-                    <td style="text-align: right;">
-                      <a href="${loginUrl}" target="_blank" style="display: inline-block; background-color: #4f46e5; color: #ffffff; font-weight: 700; text-decoration: none; padding: 8px 18px; border-radius: 8px; font-size: 13px; box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);">
-                        לחץ כאן למעבר למסך ההתחברות &larr;
-                      </a>
-                    </td>
-                  </tr>
-                </table>
+                <div style="margin-bottom: 10px; padding: 10px 14px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; display: flex; align-items: center; justify-content: space-between;">
+                  <span style="font-weight: 600; color: #64748b; font-size: 13px;">שם משתמש (דוא"ל):</span>
+                  <span dir="ltr" style="font-family: monospace, sans-serif; font-weight: 700; color: #0f172a; font-size: 14px; margin-right: 12px;">${email}</span>
+                </div>
+                <div style="margin-bottom: 12px; padding: 10px 14px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; display: flex; align-items: center; justify-content: space-between;">
+                  <span style="font-weight: 600; color: #64748b; font-size: 13px;">סיסמה ראשונית:</span>
+                  <span dir="ltr" style="font-family: monospace, sans-serif; font-weight: 700; color: #4f46e5; font-size: 14px; background-color: #eef2ff; padding: 4px 10px; border-radius: 8px; margin-right: 12px;">${password}</span>
+                </div>
+                <div style="margin-top: 14px; text-align: center;">
+                  <a href="${loginUrl}" target="_blank" style="display: inline-block; background-color: #4f46e5; color: #ffffff; font-weight: 700; text-decoration: none; padding: 10px 22px; border-radius: 10px; font-size: 13px; box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);">
+                    כניסה ישירה לממשק ההנהלה &larr;
+                  </a>
+                </div>
               </div>
 
               <!-- CTA Button -->

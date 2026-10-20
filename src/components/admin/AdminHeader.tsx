@@ -37,11 +37,10 @@ export default function AdminHeader({
         const supabase = createClient();
         await supabase.auth.signOut();
       }
-      router.push('/admin/login');
-      router.refresh();
+      window.location.href = '/admin/login';
     } catch (err) {
       console.error('Error signing out:', err);
-      router.push('/admin/login');
+      window.location.href = '/admin/login';
     } finally {
       setIsLoggingOut(false);
     }

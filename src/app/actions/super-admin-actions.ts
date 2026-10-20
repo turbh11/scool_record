@@ -420,20 +420,18 @@ export async function sendMagicLinkEmail(
     const credentialsBlock = initialPassword
       ? `
         <!-- Credentials Box -->
-        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 14px; padding: 18px 22px; margin: 24px 0; text-align: right;">
-          <p style="margin: 0 0 10px 0; font-size: 13px; font-weight: 700; color: #1e293b;">
+        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 14px; padding: 20px 22px; margin: 24px 0; text-align: right;">
+          <p style="margin: 0 0 14px 0; font-size: 14px; font-weight: 700; color: #1e293b;">
             פרטי התחברות קבועים למערכת (שם משתמש וסיסמה):
           </p>
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="4" border="0" dir="rtl" style="font-size: 13px; color: #334155;">
-            <tr>
-              <td style="font-weight: 600; width: 140px; color: #64748b;">שם משתמש (דוא״ל):</td>
-              <td dir="ltr" style="font-family: monospace, sans-serif; font-weight: 700; color: #0f172a; text-align: right;">${cleanEmail}</td>
-            </tr>
-            <tr>
-              <td style="font-weight: 600; width: 140px; color: #64748b;">סיסמה ראשונית:</td>
-              <td dir="ltr" style="font-family: monospace, sans-serif; font-weight: 700; color: #4f46e5; background-color: #eef2ff; padding: 3px 8px; border-radius: 6px; display: inline-block; text-align: right;">${initialPassword}</td>
-            </tr>
-          </table>
+          <div style="margin-bottom: 10px; padding: 10px 14px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-weight: 600; color: #64748b; font-size: 13px;">שם משתמש (דוא״ל):</span>
+            <span dir="ltr" style="font-family: monospace, sans-serif; font-weight: 700; color: #0f172a; font-size: 14px; margin-right: 12px;">${cleanEmail}</span>
+          </div>
+          <div style="margin-bottom: 12px; padding: 10px 14px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-weight: 600; color: #64748b; font-size: 13px;">סיסמה ראשונית:</span>
+            <span dir="ltr" style="font-family: monospace, sans-serif; font-weight: 700; color: #4f46e5; font-size: 14px; background-color: #eef2ff; padding: 4px 10px; border-radius: 6px; margin-right: 12px;">${initialPassword}</span>
+          </div>
           <p style="margin: 12px 0 0 0; font-size: 12px; color: #64748b; line-height: 1.5;">
             מומלץ לשנות את הסיסמה באזור האישי לאחר ההתחברות הראשונה.
           </p>

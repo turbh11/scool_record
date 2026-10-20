@@ -96,6 +96,7 @@ export async function getInstitutionTimeSlots(
 }
 
 export interface AddTimeSlotPayload {
+  id?: string;
   institution_code: string;
   period_number: number;
   start_time: string;
@@ -104,7 +105,7 @@ export interface AddTimeSlotPayload {
 }
 
 /**
- * Server Action: Adds a new period time slot to the institution's schedule.
+ * Server Action: Adds or updates a period time slot in the institution's schedule.
  * Uses the Service Role Key to bypass RLS policies.
  */
 export async function addTimeSlot(
@@ -123,6 +124,49 @@ export async function addTimeSlot(
     const normalizedEnd = normalizeTime(payload.end_time);
     const dayOfWeek = payload.day_of_week?.trim() || 'all';
 
+    const supabaseAdmin = getSupabaseAdmin();
+
+    // If updating an existing slot by ID
+    if (payload.id) {
+      if (supabaseAdmin) {
+        const { data: updated, error: updateErr } = await supabaseAdmin
+          .from('institution_time_slots')
+          .update({
+            period_number: Number(payload.period_number),
+            start_time: normalizedStart,
+            end_time: normalizedEnd,
+            day_of_week: dayOfWeek,
+          })
+          .eq('id', payload.id)
+          .select('*')
+          .single();
+
+        if (updateErr) {
+          return { success: false, error: updateErr.message };
+        }
+        return { success: true, data: updated as InstitutionTimeSlot };
+      } else {
+        const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+        const client = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, anonKey!);
+        const { data: updated, error: updateErr } = await client
+          .from('institution_time_slots')
+          .update({
+            period_number: Number(payload.period_number),
+            start_time: normalizedStart,
+            end_time: normalizedEnd,
+            day_of_week: dayOfWeek,
+          })
+          .eq('id', payload.id)
+          .select('*')
+          .single();
+
+        if (updateErr) {
+          return { success: false, error: updateErr.message };
+        }
+        return { success: true, data: updated as InstitutionTimeSlot };
+      }
+    }
+
     const insertPayload = {
       institution_code: cleanCode,
       period_number: Number(payload.period_number),
@@ -131,7 +175,6 @@ export async function addTimeSlot(
       day_of_week: dayOfWeek,
     };
 
-    const supabaseAdmin = getSupabaseAdmin();
     if (!supabaseAdmin) {
       const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
       const client = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, anonKey!);

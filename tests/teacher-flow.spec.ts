@@ -66,10 +66,10 @@ test.describe('Teacher Personal Reporting Flow', () => {
         const { data: createdTeacher } = await supabase
           .from('teachers')
           .insert({
-            school_id: school.id,
+            school_id: school?.id || '440129-default-school',
             name: 'מורה בדיקה פליירייט',
             subject: 'מתמטיקה',
-            institution_code: school.semel_mosad,
+            institution_code: school?.semel_mosad || '440129',
             magic_token: `token-teacher-${Date.now()}`,
           })
           .select('*')

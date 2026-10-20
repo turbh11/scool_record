@@ -109,9 +109,7 @@ test.describe('Admin Dashboard Flow', () => {
     const teacherInModal = page.locator('.glass-modal').getByText(uniqueTeacherName, { exact: true }).first();
     await expect(teacherInModal).toBeVisible({ timeout: 10000 });
     await teacherInModal.click();
-    await expect(
-      page.locator('.glass-modal').getByText('שיעור תגבור').first()
-    ).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.glass-modal').getByText('שיעור תגבור').first()).toBeVisible({ timeout: 10000 });
 
     // Close modal
     await page.getByRole('button', { name: /סיום וסגירה/i }).click();
@@ -151,12 +149,26 @@ test.describe('Admin Dashboard Flow', () => {
       await expect(page).toHaveURL(/\/admin(?!\/login)/, { timeout: 15000 });
     }
 
-    // 1. Test Bell Schedule modal
+    // 1. Test Bell Schedule modal & flexible multi-school customization
     const bellBtn = page.getByRole('button', { name: /לוח זמני שיעורים/i });
     await expect(bellBtn).toBeVisible({ timeout: 10000 });
     await bellBtn.click();
     await expect(page.getByText(/לוח זמני שיעורים/i).first()).toBeVisible({ timeout: 5000 });
-    // Close modal
+
+    // Verify periods are listed and not stuck in a spinner loop
+    await expect(page.getByText('שיעור 1').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('div[role="dialog"] table')).toBeVisible();
+
+    // Verify inline edit toggle works
+    const firstEditBtn = page.locator('button[title="ערוך שיעור זה"]').first();
+    if (await firstEditBtn.isVisible()) {
+      await firstEditBtn.click();
+      await expect(page.locator('button[title="שמור שינויים"]')).toBeVisible();
+      const cancelEditBtn = page.locator('button[title="בטל עריכה"]');
+      await cancelEditBtn.click();
+    }
+
+    // Close Bell Schedule modal
     const closeBellBtn = page.locator('div[role="dialog"] button:has(svg.lucide-x)').first();
     if (await closeBellBtn.isVisible()) {
       await closeBellBtn.click();

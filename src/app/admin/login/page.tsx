@@ -39,7 +39,13 @@ function AdminLoginContent() {
     useState<boolean>(() => {
       if (typeof window !== 'undefined') {
         const hash = window.location.hash || '';
-        return hash.includes('access_token') || hash.includes('type=magiclink');
+        const search = window.location.search || '';
+        return (
+          hash.includes('access_token') ||
+          hash.includes('type=magiclink') ||
+          search.includes('code=') ||
+          search.includes('token_hash=')
+        );
       }
       return false;
     });
@@ -57,12 +63,52 @@ function AdminLoginContent() {
     if (!isSupabaseConfigured()) return;
     const supabase = createClient();
 
-    // Check for existing session on mount or from URL hash token
+    const isMagicLinkInUrl = () => {
+      if (typeof window === 'undefined') return false;
+      const hash = window.location.hash || '';
+      const search = window.location.search || '';
+      return (
+        hash.includes('access_token') ||
+        hash.includes('type=magiclink') ||
+        search.includes('code=') ||
+        search.includes('token_hash=')
+      );
+    };
+
+    // If URL contains OAuth / Magic Link code or token_hash, exchange it
+    if (typeof window !== 'undefined') {
+      const code = searchParams.get('code');
+      const tokenHash = searchParams.get('token_hash');
+      if (code) {
+        setIsAuthenticatingFromLink(true);
+        supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
+          if (error) {
+            console.error('Exchange code error:', error);
+            setIsAuthenticatingFromLink(false);
+            setErrorMessage('קישור ההתחברות פג תוקף או שאינו תקין.');
+          }
+        });
+      } else if (tokenHash) {
+        setIsAuthenticatingFromLink(true);
+        supabase.auth
+          .verifyOtp({ token_hash: tokenHash, type: 'magiclink' })
+          .then(({ error }) => {
+            if (error) {
+              console.error('Verify OTP error:', error);
+              setIsAuthenticatingFromLink(false);
+              setErrorMessage('קישור ההתחברות פג תוקף או שאינו תקין.');
+            }
+          });
+      }
+    }
+
+    // Check for existing session on mount ONLY if from magic link URL
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const hash = typeof window !== 'undefined' ? window.location.hash || '' : '';
+      const hash =
+        typeof window !== 'undefined' ? window.location.hash || '' : '';
       const isRecovery = isResetModeFromQuery || hash.includes('type=recovery');
 
-      if (session && !isRecovery) {
+      if (session && !isRecovery && isMagicLinkInUrl()) {
         setIsAuthenticatingFromLink(true);
         if (session.user?.id) {
           const { data: profile } = await supabase
@@ -78,30 +124,22 @@ function AdminLoginContent() {
             return;
           }
         }
-        router.push('/admin');
         router.refresh();
+        window.location.href = '/admin';
       }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      const hash = typeof window !== 'undefined' ? window.location.hash || '' : '';
+      const hash =
+        typeof window !== 'undefined' ? window.location.hash || '' : '';
       const isRecovery = isResetModeFromQuery || hash.includes('type=recovery');
 
       if (event === 'PASSWORD_RECOVERY' || isRecovery) {
         setIsRecoveryMode(true);
         setIsAuthenticatingFromLink(false);
-      } else if (
-        event === 'SIGNED_IN' ||
-        (session && (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED'))
-      ) {
-        if (isRecovery) {
-          setIsRecoveryMode(true);
-          setIsAuthenticatingFromLink(false);
-          return;
-        }
-
+      } else if (event === 'SIGNED_IN' && isMagicLinkInUrl()) {
         setIsAuthenticatingFromLink(true);
         if (session?.user?.id) {
           const { data: profile } = await supabase
@@ -118,15 +156,15 @@ function AdminLoginContent() {
           }
         }
 
-        router.push('/admin');
         router.refresh();
+        window.location.href = '/admin';
       }
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [router, isResetModeFromQuery]);
+  }, [router, isResetModeFromQuery, searchParams]);
 
   // 1. Login with Email + Password
   const handleLoginWithPassword = async () => {
@@ -161,7 +199,7 @@ function AdminLoginContent() {
         return;
       }
 
-      // TASK 2: Block login if account is frozen (is_active is false)
+      // Block login if account is frozen (is_active is false)
       if (authData?.user?.id) {
         const { data: profile } = await supabase
           .from('admin_profiles')
@@ -177,8 +215,8 @@ function AdminLoginContent() {
       }
 
       setSuccessMessage('התחברת בהצלחה! מעביר ללוח הבקרה...');
-      router.push('/admin');
       router.refresh();
+      window.location.href = '/admin';
     } catch (err: any) {
       setErrorMessage(err?.message || 'אירעה שגיאה בתהליך ההתחברות.');
     } finally {
@@ -331,7 +369,7 @@ function AdminLoginContent() {
         )}
 
         {/* Success Alert */}
-        {successMessage && (
+        {!isAuthenticatingFromLink && successMessage && (
           <div className="mt-5 flex items-start gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/90 p-3.5 text-xs font-medium text-emerald-800">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
             <span>{successMessage}</span>

@@ -1673,6 +1673,7 @@ export default function AdminDashboardPage() {
         onClose={() => setIsBellScheduleOpen(false)}
         institutionCode={adminInstitutionCode || school?.semel_mosad || null}
         onShowToast={showToast}
+        initialSlots={institutionTimeSlots}
         onSlotsUpdated={(slots) => setInstitutionTimeSlots(slots)}
       />
 
