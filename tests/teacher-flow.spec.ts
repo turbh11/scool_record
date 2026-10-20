@@ -39,7 +39,7 @@ test.describe('Teacher Personal Reporting Flow', () => {
       const supabase = createClient(url, key);
       let { data: existing } = await supabase
         .from('teachers')
-        .select('name, magic_token')
+        .select('id, name, magic_token, institution_code')
         .not('magic_token', 'is', null)
         .limit(1)
         .maybeSingle();
@@ -72,7 +72,7 @@ test.describe('Teacher Personal Reporting Flow', () => {
             institution_code: school?.semel_mosad || '440129',
             magic_token: `token-teacher-${Date.now()}`,
           })
-          .select('*')
+          .select('id, name, magic_token, institution_code')
           .single();
         existing = createdTeacher;
       }
@@ -80,6 +80,27 @@ test.describe('Teacher Personal Reporting Flow', () => {
       if (existing) {
         teacherName = existing.name;
         teacherMagicToken = existing.magic_token;
+
+        // Ensure the teacher has at least one schedule template on Sunday (day_of_week = 1)
+        const { data: existingTpl } = await supabase
+          .from('schedule_templates')
+          .select('id')
+          .eq('teacher_id', existing.id)
+          .limit(1)
+          .maybeSingle();
+
+        if (!existingTpl) {
+          await supabase.from('schedule_templates').insert({
+            teacher_id: existing.id,
+            day_of_week: 1,
+            start_time: '08:00',
+            duration_minutes: 45,
+            subject: 'תגבור מתמטיקה',
+            class_name: 'ט׳ 1',
+            period_number: 1,
+            institution_code: existing.institution_code || '440129',
+          });
+        }
       }
     }
   });
@@ -101,7 +122,7 @@ test.describe('Teacher Personal Reporting Flow', () => {
     await expect(submitBtn).toBeVisible();
   });
 
-  test('Teacher Dashboard, Weekly Grid, Week Navigation & Reporting', async ({ page }) => {
+  test('Teacher Dashboard, Weekly Grid, Status Reporting & Undo/Reset', async ({ page }) => {
     if (!teacherMagicToken) {
       test.skip();
       return;
@@ -113,7 +134,34 @@ test.describe('Teacher Personal Reporting Flow', () => {
     await expect(page.getByText(/שלום,/i)).toBeVisible({ timeout: 15000 });
     await expect(page.getByText(/דיווח שבועי אישי/i)).toBeVisible();
 
-    // Verify Week Navigation
+    // 1. Verify Session Card & Status Reporting ("בוצע" -> Undo back to "ממתין לדיווח")
+    const firstCard = page.getByTestId('teacher-session-card').first();
+    await expect(firstCard).toBeVisible({ timeout: 10000 });
+
+    const statusBadge = firstCard.getByTestId('session-status-badge');
+    const doneBtn = firstCard.getByTestId('status-btn-done');
+
+    // If already reported from a prior run, reset it first
+    const existingResetBtn = firstCard.getByTestId('reset-session-status');
+    if (await existingResetBtn.isVisible().catch(() => false)) {
+      await existingResetBtn.click();
+      await expect(statusBadge).toContainText('ממתין לדיווח');
+    }
+
+    // Mark session as "בוצע"
+    await doneBtn.click();
+    await expect(statusBadge).toContainText('בוצע', { timeout: 5000 });
+
+    // Undo / Reset back to "ממתין לדיווח"
+    const resetBtn = firstCard.getByTestId('reset-session-status');
+    await expect(resetBtn).toBeVisible();
+    await resetBtn.click();
+    await expect(statusBadge).toContainText('ממתין לדיווח', { timeout: 5000 });
+    await expect(
+      page.getByText(/הדיווח בוטל והוחזר למצב ממתין/i)
+    ).toBeVisible({ timeout: 5000 });
+
+    // 2. Verify Week Navigation
     const prevWeekBtn = page.locator('button[title="השבוע הקודם"]');
     await expect(prevWeekBtn).toBeVisible();
     await prevWeekBtn.click();
@@ -122,7 +170,7 @@ test.describe('Teacher Personal Reporting Flow', () => {
     await expect(nextWeekBtn).toBeVisible();
     await nextWeekBtn.click();
 
-    // Verify Schedule customization accordion is toggleable
+    // 3. Verify Schedule customization accordion is toggleable
     const scheduleAccordion = page.getByText(/עריכת מערכת שעות קבועה/i);
     await expect(scheduleAccordion).toBeVisible({ timeout: 10000 });
     await scheduleAccordion.click();
@@ -131,4 +179,3 @@ test.describe('Teacher Personal Reporting Flow', () => {
     ).toBeVisible({ timeout: 5000 });
   });
 });
-

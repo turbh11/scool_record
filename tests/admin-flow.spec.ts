@@ -192,7 +192,29 @@ test.describe('Admin Dashboard Flow', () => {
     const cancelPassBtn = page.getByRole('button', { name: /ביטול/i });
     await cancelPassBtn.click();
 
-    // 4. Test Week Navigation controls
+    // 4. Test Schedule Grid Axis Toggle (Period Numbers default vs. Clock Hours)
+    const periodsToggleBtn = page.getByTestId('axis-toggle-periods');
+    const hoursToggleBtn = page.getByTestId('axis-toggle-hours');
+    await expect(periodsToggleBtn).toBeVisible();
+    await expect(hoursToggleBtn).toBeVisible();
+
+    // Default mode must be 'periods'
+    await expect(periodsToggleBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(hoursToggleBtn).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByText('שיעור 1').first()).toBeVisible();
+    await expect(page.getByText('שיעור 2').first()).toBeVisible();
+
+    // Switch to Clock Hours ('hours') mode
+    await hoursToggleBtn.click();
+    await expect(hoursToggleBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(periodsToggleBtn).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('td').getByText('08:00').first()).toBeVisible();
+
+    // Switch back to Period Numbers ('periods') mode
+    await periodsToggleBtn.click();
+    await expect(periodsToggleBtn).toHaveAttribute('aria-pressed', 'true');
+
+    // 5. Test Week Navigation controls
     const prevWeekBtn = page.locator('button[title="השבוע הקודם"]');
     await expect(prevWeekBtn).toBeVisible();
     await prevWeekBtn.click();

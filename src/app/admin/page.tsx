@@ -169,9 +169,13 @@ export default function AdminDashboardPage() {
       weekEnd: string,
       secondDayIso: string,
       currentTodayIso: string,
-      institutionOverride?: string
+      institutionOverride?: string,
+      options?: { silent?: boolean }
     ) => {
-      setReports([]);
+      const isSilent = Boolean(options?.silent);
+      if (!isSilent) {
+        setReports([]);
+      }
 
       if (!isSupabaseConfigured()) {
         setSchool(FALLBACK_SCHOOL);
@@ -221,20 +225,44 @@ export default function AdminDashboardPage() {
             dataRes.isSuperAdmin ||
               (user?.email ? isSuperAdminEmail(user.email) : false)
           );
-          setSchool(dataRes.school);
+          setSchool((prev) =>
+            JSON.stringify(prev) === JSON.stringify(dataRes.school)
+              ? prev
+              : dataRes.school
+          );
           const finalCode =
             dataRes.adminInstitutionCode ||
             dataRes.school?.semel_mosad ||
             '440129';
           setAdminInstitutionCode(finalCode);
           setAdminEmail(dataRes.adminEmail || user?.email || null);
-          setTeachers(dataRes.teachers);
-          setTemplates(dataRes.templates);
-          setReports(dataRes.reports);
-          setInstitutionTimeSlots(dataRes.timeSlots);
+          setTeachers((prev) =>
+            JSON.stringify(prev) === JSON.stringify(dataRes.teachers)
+              ? prev
+              : dataRes.teachers
+          );
+          setTemplates((prev) =>
+            JSON.stringify(prev) === JSON.stringify(dataRes.templates)
+              ? prev
+              : dataRes.templates
+          );
+          setReports((prev) =>
+            JSON.stringify(prev) === JSON.stringify(dataRes.reports)
+              ? prev
+              : dataRes.reports
+          );
+          setInstitutionTimeSlots((prev) =>
+            JSON.stringify(prev) === JSON.stringify(dataRes.timeSlots)
+              ? prev
+              : dataRes.timeSlots
+          );
           setIsUsingFallback(false);
           if (dataRes.availableSchools && dataRes.availableSchools.length > 0) {
-            setAvailableSchools(dataRes.availableSchools);
+            setAvailableSchools((prev) =>
+              JSON.stringify(prev) === JSON.stringify(dataRes.availableSchools)
+                ? prev
+                : dataRes.availableSchools!
+            );
           }
           if (typeof window !== 'undefined') {
             localStorage.setItem('admin_selected_institution', finalCode);
@@ -282,24 +310,63 @@ export default function AdminDashboardPage() {
     );
   }, [weekInfo, todayIso, fetchDashboardData]);
 
-  // Window Focus Auto-Refresh: Keep admin dashboard in sync with teacher updates
+  // Zero-Lag Background Sync: Window Focus, Visibility Change & Lightweight 6s Polling
   useEffect(() => {
-    const handleFocus = () => {
-      if (weekInfo && todayIso) {
-        fetchDashboardData(
-          weekInfo.sundayIso,
-          weekInfo.fridayIso,
-          weekInfo.days[1]?.dateIso || weekInfo.sundayIso,
-          todayIso
-        );
+    if (!weekInfo || !todayIso) return;
+
+    const triggerSilentSync = () => {
+      if (
+        typeof document !== 'undefined' &&
+        document.visibilityState !== 'visible'
+      ) {
+        return;
+      }
+      fetchDashboardData(
+        weekInfo.sundayIso,
+        weekInfo.fridayIso,
+        weekInfo.days[1]?.dateIso || weekInfo.sundayIso,
+        todayIso,
+        undefined,
+        { silent: true }
+      );
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        triggerSilentSync();
       }
     };
 
-    window.addEventListener('focus', handleFocus);
+    window.addEventListener('focus', triggerSilentSync);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    const intervalId = setInterval(() => {
+      if (
+        !isManageTeachersOpen &&
+        !isBellScheduleOpen &&
+        !isSettingsOpen &&
+        !isChangePasswordOpen &&
+        !activeSessionModal
+      ) {
+        triggerSilentSync();
+      }
+    }, 6000);
+
     return () => {
-      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('focus', triggerSilentSync);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(intervalId);
     };
-  }, [weekInfo, todayIso, fetchDashboardData]);
+  }, [
+    weekInfo,
+    todayIso,
+    fetchDashboardData,
+    isManageTeachersOpen,
+    isBellScheduleOpen,
+    isSettingsOpen,
+    isChangePasswordOpen,
+    activeSessionModal,
+  ]);
 
   // Supabase Realtime Subscription: Listen to INSERT and UPDATE on `weekly_actual_reports`
   useEffect(() => {
@@ -1680,6 +1747,7 @@ export default function AdminDashboardPage() {
         days={weekInfo.days}
         sessions={filteredSessions}
         todayIso={todayIso}
+        timeSlots={institutionTimeSlots}
         onSelectSession={(session) => setActiveSessionModal(session)}
       />
 

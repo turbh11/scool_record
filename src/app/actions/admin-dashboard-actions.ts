@@ -740,11 +740,11 @@ export interface SaveReportOverridePayload {
 }
 
 /**
- * Server Action: Upserts or updates a weekly actual report using SUPABASE_SERVICE_ROLE_KEY.
+ * Server Action: Upserts, updates, or resets a weekly actual report using SUPABASE_SERVICE_ROLE_KEY.
  */
 export async function saveWeeklyReportOverrideAction(
   payload: SaveReportOverridePayload
-): Promise<{ success: boolean; data?: WeeklyActualReport; error?: string }> {
+): Promise<{ success: boolean; data?: WeeklyActualReport | null; error?: string }> {
   try {
     const supabase = getAdminClient();
     if (!supabase) return { success: false, error: 'Database client unavailable' };
@@ -765,6 +765,18 @@ export async function saveWeeklyReportOverrideAction(
     }
 
     const { data: existing } = await checkQuery.maybeSingle();
+
+    // If resetting back to 'pending' (unreported), delete existing report row
+    if (payload.status === 'pending') {
+      if (existing?.id) {
+        const { error: delErr } = await supabase
+          .from('weekly_actual_reports')
+          .delete()
+          .eq('id', existing.id);
+        if (delErr) return { success: false, error: delErr.message };
+      }
+      return { success: true, data: null };
+    }
 
     if (existing?.id) {
       // Update
@@ -809,5 +821,54 @@ export async function saveWeeklyReportOverrideAction(
   } catch (err: any) {
     console.error('[saveWeeklyReportOverrideAction] Error:', err);
     return { success: false, error: err?.message || 'שגיאה בשמירת דיווח' };
+  }
+}
+
+export interface ResetWeeklyReportPayload {
+  report_id?: string | null;
+  teacher_id: string;
+  template_id?: string | null;
+  report_date: string;
+  start_time: string;
+}
+
+/**
+ * Server Action: Deletes/resets a weekly report row back to unreported ('pending') using SUPABASE_SERVICE_ROLE_KEY.
+ */
+export async function resetWeeklyReportAction(
+  payload: ResetWeeklyReportPayload
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabase = getAdminClient();
+    if (!supabase) return { success: false, error: 'Database client unavailable' };
+
+    const normStartTime = normalizeTime(payload.start_time);
+
+    if (payload.report_id && !payload.report_id.startsWith('temp-')) {
+      const { error } = await supabase
+        .from('weekly_actual_reports')
+        .delete()
+        .eq('id', payload.report_id);
+      if (!error) return { success: true };
+    }
+
+    let delQuery = supabase
+      .from('weekly_actual_reports')
+      .delete()
+      .eq('teacher_id', payload.teacher_id)
+      .eq('report_date', payload.report_date);
+
+    if (payload.template_id) {
+      delQuery = delQuery.eq('template_id', payload.template_id);
+    } else {
+      delQuery = delQuery.eq('start_time', normStartTime);
+    }
+
+    const { error } = await delQuery;
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    console.error('[resetWeeklyReportAction] Error:', err);
+    return { success: false, error: err?.message || 'שגיאה בביטול הדיווח' };
   }
 }

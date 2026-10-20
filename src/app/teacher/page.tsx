@@ -50,6 +50,10 @@ import {
   buildInitialFallbackReports,
 } from '@/lib/demo-data';
 import { getInstitutionTimeSlots } from '@/app/actions/schedule-actions';
+import {
+  saveWeeklyReportOverrideAction,
+  resetWeeklyReportAction,
+} from '@/app/actions/admin-dashboard-actions';
 import TeacherScheduleList from '@/components/teacher/TeacherScheduleList';
 
 function TeacherDashboardContent() {
@@ -397,11 +401,6 @@ function TeacherDashboardContent() {
         );
 
         const rawStatus: ReportStatus = matchingReport?.status ?? 'pending';
-        // Guard: Never allow a future date to appear as 'done'
-        const safeStatus: ReportStatus =
-          todayIso && dayInfo.dateIso > todayIso && rawStatus === 'done'
-            ? 'pending'
-            : rawStatus;
 
         return {
           key: `${tpl.id}_${dayInfo.dateIso}`,
@@ -416,28 +415,58 @@ function TeacherDashboardContent() {
             matchingReport?.duration_minutes ?? tpl.duration_minutes,
           subject: matchingReport?.subject ?? tpl.subject,
           class_name: matchingReport?.class_name ?? tpl.class_name ?? null,
-          status: safeStatus,
+          status: rawStatus,
           notes: matchingReport?.notes ?? '',
           period_number: tpl.period_number ?? null,
         };
       })
       .filter((item): item is EnrichedSessionItem => item !== null);
-  }, [weekInfo, activeTeacher, templates, reports, todayIso]);
+  }, [weekInfo, activeTeacher, templates, reports]);
 
-  // Single Session Update with Future-Date Protection & Optimistic State
+  // Single Session Update with Undo/Reset ('pending') & Optimistic State
   const handleUpdateSession = async (
     session: EnrichedSessionItem,
     newStatus: ReportStatus,
     notes: string
   ) => {
-    // Business Logic Guard: Prevent marking future sessions as "Done"
-    if (todayIso && session.report_date > todayIso && newStatus === 'done') {
-      showToast('לא ניתן לדווח "בוצע" על מפגש בתאריך עתידי');
+    setSavingSessionKey(session.key);
+
+    // 1. Handle Undo / Reset back to 'pending' (ממתין לדיווח)
+    if (newStatus === 'pending') {
+      setReports((prev) =>
+        prev.filter(
+          (r) =>
+            !(
+              r.report_date === session.report_date &&
+              r.teacher_id === session.teacher_id &&
+              (r.template_id === session.template_id ||
+                normalizeTime(r.start_time) === session.start_time)
+            )
+        )
+      );
+
+      if (isSupabaseConfigured() && !isUsingFallback) {
+        const res = await resetWeeklyReportAction({
+          report_id: session.report_id,
+          teacher_id: session.teacher_id,
+          template_id: session.template_id,
+          report_date: session.report_date,
+          start_time: session.start_time,
+        });
+        if (!res.success) {
+          showToast('שגיאה בביטול הדיווח בשרת');
+        } else {
+          showToast('הדיווח בוטל והוחזר למצב ממתין');
+        }
+      } else {
+        showToast('הדיווח בוטל והוחזר למצב ממתין');
+      }
+
+      setSavingSessionKey(null);
       return;
     }
 
-    setSavingSessionKey(session.key);
-
+    // 2. Handle reporting ('done', 'missed', 'excused') with Optimistic UI
     const optimisticRow: WeeklyActualReport = {
       id: session.report_id || `temp-${session.key}`,
       teacher_id: session.teacher_id,
@@ -468,8 +497,7 @@ function TeacherDashboardContent() {
     });
 
     if (isSupabaseConfigured() && !isUsingFallback) {
-      const supabase = createClient();
-      const { data: savedRow, error } = await saveWeeklyReportSafe(supabase, {
+      const res = await saveWeeklyReportOverrideAction({
         teacher_id: session.teacher_id,
         template_id: session.template_id,
         report_date: session.report_date,
@@ -479,16 +507,19 @@ function TeacherDashboardContent() {
         class_name: session.class_name ?? null,
         status: newStatus,
         notes,
+        institution_code: activeTeacher?.institution_code || null,
       });
 
-      if (error) {
+      if (!res.success) {
         showToast('שגיאה בשמירת הדיווח בשרת');
-      } else if (savedRow) {
+      } else if (res.data) {
+        const savedRow = res.data;
         setReports((prev) =>
           prev.map((r) =>
             r.report_date === savedRow.report_date &&
             r.teacher_id === savedRow.teacher_id &&
-            r.template_id === savedRow.template_id
+            (r.template_id === savedRow.template_id ||
+              normalizeTime(r.start_time) === normalizeTime(savedRow.start_time))
               ? savedRow
               : r
           )
