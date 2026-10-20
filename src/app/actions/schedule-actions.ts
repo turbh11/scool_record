@@ -3,15 +3,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { InstitutionTimeSlot } from '@/types/database';
 import { normalizeTime } from '@/lib/dates';
-
-export const DEFAULT_BELL_PRESETS = [
-  { period_number: 1, start_time: '08:00', end_time: '08:45', day_of_week: 'all' },
-  { period_number: 2, start_time: '08:50', end_time: '09:35', day_of_week: 'all' },
-  { period_number: 3, start_time: '09:50', end_time: '10:35', day_of_week: 'all' },
-  { period_number: 4, start_time: '10:40', end_time: '11:25', day_of_week: 'all' },
-  { period_number: 5, start_time: '11:35', end_time: '12:20', day_of_week: 'all' },
-  { period_number: 6, start_time: '12:25', end_time: '13:10', day_of_week: 'all' },
-];
+import { DEFAULT_BELL_PRESETS } from '@/lib/constants/bell-schedule';
 
 /**
  * Returns a Supabase client initialized with the Master Service Role Key
@@ -322,42 +314,17 @@ export async function loadDefaultTimeSlots(
       return { success: true, data: (data || []) as InstitutionTimeSlot[] };
     }
 
-    let { data, error } = await supabaseAdmin
+    // Safely delete any existing 1-6 periods for this institution to avoid any constraint issues
+    await supabaseAdmin
       .from('institution_time_slots')
-      .upsert(rowsToInsert, { onConflict: 'institution_code,period_number' })
+      .delete()
+      .eq('institution_code', cleanCode)
+      .in('period_number', [1, 2, 3, 4, 5, 6]);
+
+    const { data, error } = await supabaseAdmin
+      .from('institution_time_slots')
+      .insert(rowsToInsert)
       .select('*');
-
-    if (error && error.code === '23505') {
-      // If constraint definition differs, safely delete existing default periods and re-insert
-      await supabaseAdmin
-        .from('institution_time_slots')
-        .delete()
-        .eq('institution_code', cleanCode)
-        .in('period_number', [1, 2, 3, 4, 5, 6]);
-
-      const retryRes = await supabaseAdmin
-        .from('institution_time_slots')
-        .insert(rowsToInsert)
-        .select('*');
-      data = retryRes.data;
-      error = retryRes.error;
-    }
-
-    if (error && (error.code === '42501' || error.message?.includes('permission denied'))) {
-      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-      if (anonKey) {
-        const fallbackClient = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          anonKey
-        );
-        const fbRes = await fallbackClient
-          .from('institution_time_slots')
-          .upsert(rowsToInsert, { onConflict: 'institution_code,period_number' })
-          .select('*');
-        data = fbRes.data;
-        error = fbRes.error;
-      }
-    }
 
     if (error) {
       console.error('[loadDefaultTimeSlots] Insert error:', error);

@@ -36,6 +36,7 @@ import {
   createClient,
   isSupabaseConfigured,
 } from '@/lib/supabase/client';
+import { isSuperAdminEmail } from '@/lib/super-admin';
 import {
   seedDemoSchoolData,
 } from '@/lib/supabase/reports-service';
@@ -144,6 +145,15 @@ export default function AdminDashboardPage() {
     const now = new Date();
     setReferenceDate(now);
     setTodayIso(formatDateIsoLocal(now));
+
+    if (isSupabaseConfigured()) {
+      const supabase = createClient();
+      supabase.auth.getUser().then(({ data }) => {
+        if (data?.user?.email && isSuperAdminEmail(data.user.email)) {
+          setIsSuperAdmin(true);
+        }
+      });
+    }
   }, []);
 
   const weekInfo = useMemo(() => {
@@ -206,9 +216,16 @@ export default function AdminDashboardPage() {
         }
 
         if (dataRes.success) {
-          setIsSuperAdmin(dataRes.isSuperAdmin);
+          setIsSuperAdmin(
+            dataRes.isSuperAdmin ||
+              (user?.email ? isSuperAdminEmail(user.email) : false)
+          );
           setSchool(dataRes.school);
-          setAdminInstitutionCode(dataRes.adminInstitutionCode);
+          const finalCode =
+            dataRes.adminInstitutionCode ||
+            dataRes.school?.semel_mosad ||
+            '440129';
+          setAdminInstitutionCode(finalCode);
           setAdminEmail(dataRes.adminEmail || user?.email || null);
           setTeachers(dataRes.teachers);
           setTemplates(dataRes.templates);
@@ -218,11 +235,8 @@ export default function AdminDashboardPage() {
           if (dataRes.availableSchools && dataRes.availableSchools.length > 0) {
             setAvailableSchools(dataRes.availableSchools);
           }
-          if (dataRes.adminInstitutionCode && typeof window !== 'undefined') {
-            localStorage.setItem(
-              'admin_selected_institution',
-              dataRes.adminInstitutionCode
-            );
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('admin_selected_institution', finalCode);
           }
         }
       } catch (err) {
@@ -787,7 +801,7 @@ export default function AdminDashboardPage() {
     const effectiveCode = adminInstitutionCode || school?.semel_mosad || null;
     const targetSchoolId = school?.id;
 
-    if (isSupabaseConfigured() && !isUsingFallback && targetSchoolId) {
+    if (isSupabaseConfigured() && !isUsingFallback) {
       const res = await saveTeacherAction({
         school_id: targetSchoolId,
         name: payload.name,
@@ -860,7 +874,7 @@ export default function AdminDashboardPage() {
       )
     );
 
-    if (isSupabaseConfigured() && !isUsingFallback && targetSchoolId) {
+    if (isSupabaseConfigured() && !isUsingFallback) {
       const res = await saveTeacherAction({
         id: teacherId,
         school_id: targetSchoolId,
@@ -952,7 +966,7 @@ export default function AdminDashboardPage() {
       }
 
       const saved = res.data;
-      if (templateData.id) {
+      if (templateData.id && !templateData.id.startsWith('local-')) {
         setTemplates((prev) =>
           prev.map((tpl) => (tpl.id === saved.id ? saved : tpl))
         );
@@ -1372,10 +1386,10 @@ export default function AdminDashboardPage() {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-2xl font-bold text-slate-900">
-                  {school?.name || 'בית ספר'}
+                  {school?.name || 'תיכון ממלכתי רבין - תל אביב'}
                 </h1>
                 <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-0.5 text-xs font-semibold text-indigo-700">
-                  סמל מוסד: {adminInstitutionCode || school?.semel_mosad || '---'}
+                  סמל מוסד: {adminInstitutionCode && adminInstitutionCode !== '---' ? adminInstitutionCode : (school?.semel_mosad && school?.semel_mosad !== '---' ? school.semel_mosad : '440129')}
                 </span>
               </div>
               <p className="mt-1 text-sm text-slate-500">

@@ -389,21 +389,27 @@ export default function TeacherScheduleModal({
       return;
     }
     setIsAddingTeacher(true);
-    const created = await onAddTeacher({
-      name: newTeacherName.trim(),
-      subject: newTeacherSubject.trim() || 'כללי',
-      phone: newTeacherPhone.trim() || undefined,
-      email: newTeacherEmail.trim() || undefined,
-    });
-    if (created) {
-      setSelectedTeacherId(created.id);
-      setNewTeacherName('');
-      setNewTeacherSubject('');
-      setNewTeacherPhone('');
-      setNewTeacherEmail('');
-      setSlotSubject(created.subject);
+    try {
+      const created = await onAddTeacher({
+        name: newTeacherName.trim(),
+        subject: newTeacherSubject.trim() || 'כללי',
+        phone: newTeacherPhone.trim() || undefined,
+        email: newTeacherEmail.trim() || undefined,
+      });
+      if (created) {
+        setSelectedTeacherId(created.id);
+        setNewTeacherName('');
+        setNewTeacherSubject('');
+        setNewTeacherPhone('');
+        setNewTeacherEmail('');
+        setSlotSubject(created.subject);
+      }
+    } catch (err: any) {
+      console.error('[handleCreateTeacher] Error:', err);
+      onShowToast('שגיאה בהוספת המורה');
+    } finally {
+      setIsAddingTeacher(false);
     }
-    setIsAddingTeacher(false);
   };
 
   const handleStartEditTeacher = (teacher: Teacher) => {
@@ -417,14 +423,20 @@ export default function TeacherScheduleModal({
   const handleConfirmEditTeacher = async () => {
     if (!editingTeacherId || !editTeacherName.trim()) return;
     setIsUpdatingTeacher(true);
-    await onUpdateTeacher(editingTeacherId, {
-      name: editTeacherName.trim(),
-      subject: editTeacherSubject.trim() || 'כללי',
-      phone: editTeacherPhone.trim() || undefined,
-      email: editTeacherEmail.trim() || undefined,
-    });
-    setEditingTeacherId(null);
-    setIsUpdatingTeacher(false);
+    try {
+      await onUpdateTeacher(editingTeacherId, {
+        name: editTeacherName.trim(),
+        subject: editTeacherSubject.trim() || 'כללי',
+        phone: editTeacherPhone.trim() || undefined,
+        email: editTeacherEmail.trim() || undefined,
+      });
+      setEditingTeacherId(null);
+    } catch (err: any) {
+      console.error('[handleConfirmEditTeacher] Error:', err);
+      onShowToast('שגיאה בעדכון המורה');
+    } finally {
+      setIsUpdatingTeacher(false);
+    }
   };
 
   const handleRemoveTeacher = async (teacher: Teacher) => {
@@ -551,23 +563,34 @@ export default function TeacherScheduleModal({
   };
 
   const handleSaveSlot = async () => {
-    if (!activeTeacher) return;
+    if (!activeTeacher) {
+      onShowToast('נא לבחור מורה תחילה');
+      return;
+    }
     if (!slotSubject.trim()) {
       onShowToast('נא להזין נושא לשעה הפרטנית');
       return;
     }
     setIsSavingSlot(true);
-    await onSaveTemplate(activeTeacher.id, {
-      id: editingTemplateId || undefined,
-      day_of_week: slotDay,
-      start_time: slotTime,
-      duration_minutes: Number(slotDuration) || 45,
-      subject: slotSubject.trim(),
-      class_name: slotClassName.trim() || null,
-      period_number: slotPeriodNumber,
-    });
-    handleResetSlotForm();
-    setIsSavingSlot(false);
+    try {
+      const saved = await onSaveTemplate(activeTeacher.id, {
+        id: editingTemplateId || undefined,
+        day_of_week: slotDay,
+        start_time: slotTime,
+        duration_minutes: Number(slotDuration) || 45,
+        subject: slotSubject.trim(),
+        class_name: slotClassName.trim() || null,
+        period_number: slotPeriodNumber,
+      });
+      if (saved) {
+        handleResetSlotForm();
+      }
+    } catch (err: any) {
+      console.error('[handleSaveSlot] Error:', err);
+      onShowToast('שגיאה בשמירת משבצת השעה');
+    } finally {
+      setIsSavingSlot(false);
+    }
   };
 
   return (

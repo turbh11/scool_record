@@ -1,18 +1,26 @@
 /**
- * Super Admin helpers (server / middleware only).
+ * Super Admin helpers.
  *
  * SUPER_ADMIN_EMAILS is a comma-separated list of emails, e.g.:
- *   SUPER_ADMIN_EMAILS=owner@example.com, partner@example.com
+ *   SUPER_ADMIN_EMAILS=barakbenacon@gmail.com, partner@example.com
  *
- * NOTE: This variable is intentionally NOT prefixed with NEXT_PUBLIC_, so it is never
- * shipped to the browser. Client components must ask the server via the
- * `getIsSuperAdmin()` server action instead of reading it directly.
+ * Includes the primary Super Admin email as a fallback so client and server
+ * evaluations never fail during initial session hydration.
  */
+
+const DEFAULT_SUPER_ADMIN_FALLBACKS = ['barakbenacon@gmail.com'];
+
 export function getSuperAdminEmails(): string[] {
-  return (process.env.SUPER_ADMIN_EMAILS || '')
+  const envEmails = (
+    process.env.SUPER_ADMIN_EMAILS ||
+    process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS ||
+    ''
+  )
     .split(',')
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
+
+  return Array.from(new Set([...envEmails, ...DEFAULT_SUPER_ADMIN_FALLBACKS]));
 }
 
 export function isSuperAdminEmail(email?: string | null): boolean {

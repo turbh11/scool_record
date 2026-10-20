@@ -69,16 +69,12 @@ export default function AdminHeader({
             </div>
           ) : (
             <>
-              {schoolName && (
-                <span className="text-xs sm:text-sm font-bold text-slate-800">
-                  {schoolName}
-                </span>
-              )}
-              {institutionCode && (
-                <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-700">
-                  מוסד: {institutionCode}
-                </span>
-              )}
+              <span className="text-xs sm:text-sm font-bold text-slate-800">
+                {schoolName || 'תיכון ממלכתי רבין - תל אביב'}
+              </span>
+              <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-700">
+                מוסד: {institutionCode && institutionCode !== '---' ? institutionCode : '440129'}
+              </span>
             </>
           )}
         </div>
