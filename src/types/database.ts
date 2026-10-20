@@ -40,6 +40,7 @@ export interface InstitutionTimeSlot {
   period_number: number;
   start_time: string; // "HH:MM" or "HH:MM:SS"
   end_time: string;   // "HH:MM" or "HH:MM:SS"
+  day_of_week?: string | null; // 'all', '1', '2', '3', '4', '5', '6'
   created_at?: string;
 }
 

@@ -30,6 +30,7 @@ import {
   WeeklyActualReport,
   EnrichedSessionItem,
   ReportStatus,
+  InstitutionTimeSlot,
 } from '@/types/database';
 import {
   createClient,
@@ -62,6 +63,7 @@ import {
 } from '@/lib/excel';
 import { sendBulkMagicLinks } from '@/app/actions/email';
 import { getIsSuperAdmin } from '@/app/actions/auth';
+import { getInstitutionTimeSlots } from '@/app/actions/schedule-actions';
 import AdminHeader from '@/components/admin/AdminHeader';
 import KpiCards from '@/components/admin/KpiCards';
 import WeeklyTimeGrid from '@/components/admin/WeeklyTimeGrid';
@@ -90,6 +92,9 @@ export default function AdminDashboardPage() {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [templates, setTemplates] = useState<ScheduleTemplate[]>([]);
   const [reports, setReports] = useState<WeeklyActualReport[]>([]);
+  const [institutionTimeSlots, setInstitutionTimeSlots] = useState<
+    InstitutionTimeSlot[]
+  >([]);
 
   // TASK 1: Scalable Search & Subject Filter State (replaces horizontal pill list for 70+ teachers)
   const [teacherSearchQuery, setTeacherSearchQuery] = useState<string>('');
@@ -370,9 +375,12 @@ export default function AdminDashboardPage() {
           );
         }
 
-        const [templatesRes, reportsRes] = await Promise.all([
+        const [templatesRes, reportsRes, slotsRes] = await Promise.all([
           templatesQuery,
           reportsQuery,
+          resolvedCode
+            ? getInstitutionTimeSlots(resolvedCode)
+            : Promise.resolve({ success: true, data: [] }),
         ]);
 
         const strictlyFilteredReports = (
@@ -381,6 +389,9 @@ export default function AdminDashboardPage() {
 
         setTemplates((templatesRes.data || []) as ScheduleTemplate[]);
         setReports(strictlyFilteredReports);
+        if (slotsRes?.success && slotsRes.data) {
+          setInstitutionTimeSlots(slotsRes.data);
+        }
       } catch (err) {
         console.error('Error loading admin dashboard:', err);
         if (schoolData) {
@@ -405,6 +416,25 @@ export default function AdminDashboardPage() {
       weekInfo.days[1]?.dateIso || weekInfo.sundayIso,
       todayIso
     );
+  }, [weekInfo, todayIso, fetchDashboardData]);
+
+  // Window Focus Auto-Refresh: Keep admin dashboard in sync with teacher updates
+  useEffect(() => {
+    const handleFocus = () => {
+      if (weekInfo && todayIso) {
+        fetchDashboardData(
+          weekInfo.sundayIso,
+          weekInfo.fridayIso,
+          weekInfo.days[1]?.dateIso || weekInfo.sundayIso,
+          todayIso
+        );
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [weekInfo, todayIso, fetchDashboardData]);
 
   // Supabase Realtime Subscription: Listen to INSERT and UPDATE on `weekly_actual_reports`
@@ -519,6 +549,78 @@ export default function AdminDashboardPage() {
             }
             return [...prev, incoming];
           });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'weekly_actual_reports',
+        },
+        (payload) => {
+          const oldId = payload.old?.id;
+          if (oldId) {
+            setReports((prev) => prev.filter((r) => r.id !== oldId));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'schedule_templates',
+        },
+        (payload) => {
+          const incomingTpl = payload.new as ScheduleTemplate;
+          if (!incomingTpl?.id) return;
+          if (
+            schoolTeacherIds.size > 0 &&
+            !schoolTeacherIds.has(incomingTpl.teacher_id)
+          ) {
+            return;
+          }
+          if (
+            effectiveCode &&
+            incomingTpl.institution_code &&
+            incomingTpl.institution_code !== effectiveCode
+          ) {
+            return;
+          }
+          setTemplates((prev) => {
+            if (prev.some((t) => t.id === incomingTpl.id)) return prev;
+            return [...prev, incomingTpl];
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'schedule_templates',
+        },
+        (payload) => {
+          const incomingTpl = payload.new as ScheduleTemplate;
+          if (!incomingTpl?.id) return;
+          setTemplates((prev) =>
+            prev.map((t) => (t.id === incomingTpl.id ? { ...t, ...incomingTpl } : t))
+          );
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'schedule_templates',
+        },
+        (payload) => {
+          const oldId = payload.old?.id;
+          if (oldId) {
+            setTemplates((prev) => prev.filter((t) => t.id !== oldId));
+          }
         }
       )
       .on(
@@ -1625,10 +1727,10 @@ export default function AdminDashboardPage() {
               type="button"
               onClick={() => setIsBellScheduleOpen(true)}
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs sm:text-sm font-semibold text-slate-700 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/50 hover:text-indigo-700"
-              title="מערכת צלצולים ושעות שיעורים"
+              title="לוח זמני שיעורים"
             >
               <Bell className="h-4 w-4 text-indigo-600" />
-              <span>מערכת צלצולים</span>
+              <span>לוח זמני שיעורים</span>
             </button>
 
             <button
@@ -1860,6 +1962,7 @@ export default function AdminDashboardPage() {
         onClose={() => setIsBellScheduleOpen(false)}
         institutionCode={adminInstitutionCode || school?.semel_mosad || null}
         onShowToast={showToast}
+        onSlotsUpdated={(slots) => setInstitutionTimeSlots(slots)}
       />
 
       {/* Teacher & Schedule Management Modal */}
@@ -1867,6 +1970,7 @@ export default function AdminDashboardPage() {
         isOpen={isManageTeachersOpen}
         teachers={teachers}
         templates={templates}
+        timeSlots={institutionTimeSlots}
         onClose={() => setIsManageTeachersOpen(false)}
         onAddTeacher={handleAddTeacher}
         onUpdateTeacher={handleUpdateTeacher}

@@ -175,7 +175,7 @@ EXCEPTION
 END $$;
 
 -- ============================================================================
--- 8. BELL SCHEDULE / מערכת צלצולים (institution_time_slots) & PERIOD NUMBERS
+-- 8. LESSON TIMES SCHEDULE / לוח זמני שיעורים (institution_time_slots) & PERIOD NUMBERS
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS public.institution_time_slots (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -183,9 +183,11 @@ CREATE TABLE IF NOT EXISTS public.institution_time_slots (
     period_number INT NOT NULL,
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
+    day_of_week TEXT DEFAULT 'all',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE public.institution_time_slots ADD COLUMN IF NOT EXISTS day_of_week TEXT DEFAULT 'all';
 ALTER TABLE public.schedule_templates ADD COLUMN IF NOT EXISTS period_number INT;
 ALTER TABLE public.weekly_actual_reports ADD COLUMN IF NOT EXISTS period_number INT;
 
@@ -194,6 +196,6 @@ CREATE INDEX IF NOT EXISTS idx_time_slots_institution ON public.institution_time
 ALTER TABLE public.institution_time_slots ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all access to institution_time_slots" ON public.institution_time_slots;
 CREATE POLICY "Allow all access to institution_time_slots"
-    ON public.institution_time_slots FOR ALL TO anon, authenticated
+    ON public.institution_time_slots FOR ALL TO anon, authenticated, service_role
     USING (true) WITH CHECK (true);
 

@@ -49,15 +49,7 @@ import {
   FALLBACK_TEMPLATES,
   buildInitialFallbackReports,
 } from '@/lib/demo-data';
-
-const DEFAULT_BELL_TIME_SLOTS: InstitutionTimeSlot[] = [
-  { id: 'preset-1', institution_code: '', period_number: 1, start_time: '08:00', end_time: '08:45' },
-  { id: 'preset-2', institution_code: '', period_number: 2, start_time: '08:50', end_time: '09:35' },
-  { id: 'preset-3', institution_code: '', period_number: 3, start_time: '09:50', end_time: '10:35' },
-  { id: 'preset-4', institution_code: '', period_number: 4, start_time: '10:40', end_time: '11:25' },
-  { id: 'preset-5', institution_code: '', period_number: 5, start_time: '11:35', end_time: '12:20' },
-  { id: 'preset-6', institution_code: '', period_number: 6, start_time: '12:25', end_time: '13:10' },
-];
+import { getInstitutionTimeSlots } from '@/app/actions/schedule-actions';
 import TeacherScheduleList from '@/components/teacher/TeacherScheduleList';
 
 function TeacherDashboardContent() {
@@ -94,10 +86,23 @@ function TeacherDashboardContent() {
   const [isSavingSlot, setIsSavingSlot] = useState<boolean>(false);
   const [deletingSlotId, setDeletingSlotId] = useState<string | null>(null);
 
-  // Bell Schedule & Hybrid Period State
-  const [timeSlots, setTimeSlots] = useState<InstitutionTimeSlot[]>(DEFAULT_BELL_TIME_SLOTS);
+  // Lesson Times Schedule & Hybrid Period State (Real data from DB)
+  const [timeSlots, setTimeSlots] = useState<InstitutionTimeSlot[]>([]);
   const [selectedPeriodOption, setSelectedPeriodOption] = useState<string>('custom');
   const [slotPeriodNumber, setSlotPeriodNumber] = useState<number | null>(null);
+
+  // Filter timeSlots based on selected day_of_week with fallback to 'all'
+  const activeDaySlots = useMemo(() => {
+    if (!timeSlots || timeSlots.length === 0) return [];
+    const dayStr = String(slotDay);
+    const specific = timeSlots.filter((s) => s.day_of_week === dayStr);
+    if (specific.length > 0) {
+      return specific.sort((a, b) => a.period_number - b.period_number);
+    }
+    return timeSlots
+      .filter((s) => s.day_of_week === 'all' || !s.day_of_week)
+      .sort((a, b) => a.period_number - b.period_number);
+  }, [timeSlots, slotDay]);
 
   // Dual-Role Check (Admin switching to Teacher)
   const [isUserAdmin, setIsUserAdmin] = useState<boolean>(false);
@@ -298,12 +303,8 @@ function TeacherDashboardContent() {
             .gte('report_date', weekStart)
             .lte('report_date', weekEnd),
           effectiveCode
-            ? supabase
-                .from('institution_time_slots')
-                .select('*')
-                .eq('institution_code', effectiveCode)
-                .order('period_number', { ascending: true })
-            : Promise.resolve({ data: null, error: null }),
+            ? getInstitutionTimeSlots(effectiveCode)
+            : Promise.resolve({ success: true, data: [] }),
         ]);
 
         const fetchedReports = ((repRes.data || []) as WeeklyActualReport[]).filter(
@@ -312,8 +313,10 @@ function TeacherDashboardContent() {
 
         setTemplates((tplRes.data || []) as ScheduleTemplate[]);
         setReports(fetchedReports);
-        if (slotsRes?.data && (slotsRes.data as any[]).length > 0) {
-          setTimeSlots(slotsRes.data as InstitutionTimeSlot[]);
+        if (slotsRes?.success && slotsRes.data) {
+          setTimeSlots(slotsRes.data);
+        } else {
+          setTimeSlots([]);
         }
       } catch (err) {
         console.error('Error loading isolated teacher dashboard:', err);
@@ -570,9 +573,13 @@ function TeacherDashboardContent() {
     if (val === 'custom') {
       setSlotPeriodNumber(null);
     } else {
-      const matched = timeSlots.find(
-        (s) => s.id === val || String(s.period_number) === val
-      );
+      const matched =
+        activeDaySlots.find(
+          (s) => s.id === val || String(s.period_number) === val
+        ) ||
+        timeSlots.find(
+          (s) => s.id === val || String(s.period_number) === val
+        );
       if (matched) {
         setSlotPeriodNumber(matched.period_number);
         const normStart = normalizeTime(matched.start_time);
@@ -620,8 +627,8 @@ function TeacherDashboardContent() {
   const handleCancelEditSlot = () => {
     setEditingSlotId(null);
     setSlotDay(1);
-    if (timeSlots.length > 0) {
-      const first = timeSlots[0];
+    if (activeDaySlots.length > 0) {
+      const first = activeDaySlots[0];
       setSelectedPeriodOption(first.id);
       setSlotPeriodNumber(first.period_number);
       const normStart = normalizeTime(first.start_time);
@@ -748,6 +755,7 @@ function TeacherDashboardContent() {
     // Reset state on success
     handleCancelEditSlot();
     setIsSavingSlot(false);
+    router.refresh();
   };
 
   const handleDeleteTemplateSlot = async (slotId: string) => {
@@ -785,6 +793,7 @@ function TeacherDashboardContent() {
     setTemplates((prev) => prev.filter((t) => t.id !== slotId));
     showToast('משבצת השעה הוסרה מהמערכת הקבועה');
     setDeletingSlotId(null);
+    router.refresh();
   };
 
   // Enter Magic Token if teacher opened `/teacher` without `?token=XYZ`
@@ -1021,17 +1030,17 @@ function TeacherDashboardContent() {
                   </select>
                 </div>
 
-                {/* Period Selector (Replacing raw Start Time & Duration) */}
+                {/* Period Selector (Lesson Times Schedule) */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    שיעור (מערכת צלצולים) *
+                    שיעור (לוח זמנים) *
                   </label>
                   <select
                     value={selectedPeriodOption}
                     onChange={(e) => handlePeriodSelectChange(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-sky-500"
                   >
-                    {timeSlots.map((ts) => (
+                    {activeDaySlots.map((ts) => (
                       <option key={ts.id} value={ts.id}>
                         שיעור {ts.period_number} ({normalizeTime(ts.start_time)} - {normalizeTime(ts.end_time)})
                       </option>

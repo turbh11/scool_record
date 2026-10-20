@@ -35,6 +35,14 @@ function AdminLoginContent() {
   >(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isAuthenticatingFromLink, setIsAuthenticatingFromLink] =
+    useState<boolean>(() => {
+      if (typeof window !== 'undefined') {
+        const hash = window.location.hash || '';
+        return hash.includes('access_token') || hash.includes('type=magiclink');
+      }
+      return false;
+    });
 
   useEffect(() => {
     if (isResetModeFromQuery) {
@@ -49,18 +57,76 @@ function AdminLoginContent() {
     if (!isSupabaseConfigured()) return;
     const supabase = createClient();
 
+    // Check for existing session on mount or from URL hash token
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      const hash = typeof window !== 'undefined' ? window.location.hash || '' : '';
+      const isRecovery = isResetModeFromQuery || hash.includes('type=recovery');
+
+      if (session && !isRecovery) {
+        setIsAuthenticatingFromLink(true);
+        if (session.user?.id) {
+          const { data: profile } = await supabase
+            .from('admin_profiles')
+            .select('is_active')
+            .eq('id', session.user.id)
+            .maybeSingle();
+
+          if (profile && profile.is_active === false) {
+            await supabase.auth.signOut();
+            setErrorMessage('הגישה למערכת הוקפאה. אנא פנה להנהלה.');
+            setIsAuthenticatingFromLink(false);
+            return;
+          }
+        }
+        router.push('/admin');
+        router.refresh();
+      }
+    });
+
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const hash = typeof window !== 'undefined' ? window.location.hash || '' : '';
+      const isRecovery = isResetModeFromQuery || hash.includes('type=recovery');
+
+      if (event === 'PASSWORD_RECOVERY' || isRecovery) {
         setIsRecoveryMode(true);
+        setIsAuthenticatingFromLink(false);
+      } else if (
+        event === 'SIGNED_IN' ||
+        (session && (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED'))
+      ) {
+        if (isRecovery) {
+          setIsRecoveryMode(true);
+          setIsAuthenticatingFromLink(false);
+          return;
+        }
+
+        setIsAuthenticatingFromLink(true);
+        if (session?.user?.id) {
+          const { data: profile } = await supabase
+            .from('admin_profiles')
+            .select('is_active')
+            .eq('id', session.user.id)
+            .maybeSingle();
+
+          if (profile && profile.is_active === false) {
+            await supabase.auth.signOut();
+            setErrorMessage('הגישה למערכת הוקפאה. אנא פנה להנהלה.');
+            setIsAuthenticatingFromLink(false);
+            return;
+          }
+        }
+
+        router.push('/admin');
+        router.refresh();
       }
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [router, isResetModeFromQuery]);
 
   // 1. Login with Email + Password
   const handleLoginWithPassword = async () => {
@@ -272,7 +338,19 @@ function AdminLoginContent() {
           </div>
         )}
 
-        {isRecoveryMode ? (
+        {isAuthenticatingFromLink ? (
+          <div className="my-10 flex flex-col items-center justify-center space-y-3.5 text-center">
+            <Loader2 className="h-10 w-10 animate-spin text-indigo-600" />
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold text-slate-800">
+                מאמת קישור כניסה מאובטח (Magic Link)...
+              </h3>
+              <p className="text-xs text-slate-500">
+                מעביר אותך ישירות ללוח הניהול, אנא המתן/י
+              </p>
+            </div>
+          </div>
+        ) : isRecoveryMode ? (
           /* Password Recovery Mode */
           <div className="mt-6 space-y-4">
             <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 p-3 text-xs text-indigo-900">

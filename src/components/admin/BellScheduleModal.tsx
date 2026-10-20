@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   X,
-  Bell,
+  Calendar,
   Clock,
   Plus,
   Trash2,
@@ -13,30 +13,44 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { InstitutionTimeSlot } from '@/types/database';
-import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
 import { normalizeTime } from '@/lib/dates';
+import {
+  getInstitutionTimeSlots,
+  addTimeSlot,
+  deleteTimeSlot,
+  loadDefaultTimeSlots,
+} from '@/app/actions/schedule-actions';
 
 interface BellScheduleModalProps {
   isOpen: boolean;
   onClose: () => void;
   institutionCode: string | null;
   onShowToast: (msg: string) => void;
+  onSlotsUpdated?: (slots: InstitutionTimeSlot[]) => void;
 }
 
-const DEFAULT_BELL_PRESETS = [
-  { period_number: 1, start_time: '08:00', end_time: '08:45' },
-  { period_number: 2, start_time: '08:50', end_time: '09:35' },
-  { period_number: 3, start_time: '09:50', end_time: '10:35' },
-  { period_number: 4, start_time: '10:40', end_time: '11:25' },
-  { period_number: 5, start_time: '11:35', end_time: '12:20' },
-  { period_number: 6, start_time: '12:25', end_time: '13:10' },
+export const DAY_OPTIONS = [
+  { value: 'all', label: 'כל הימים (רגיל)' },
+  { value: '1', label: 'יום ראשון' },
+  { value: '2', label: 'יום שני' },
+  { value: '3', label: 'יום שלישי' },
+  { value: '4', label: 'יום רביעי' },
+  { value: '5', label: 'יום חמישי' },
+  { value: '6', label: 'יום שישי' },
 ];
+
+export function getDayLabel(dayValue?: string | null): string {
+  if (!dayValue || dayValue === 'all') return 'כל הימים';
+  const found = DAY_OPTIONS.find((o) => o.value === dayValue);
+  return found ? found.label : dayValue;
+}
 
 export default function BellScheduleModal({
   isOpen,
   onClose,
   institutionCode,
   onShowToast,
+  onSlotsUpdated,
 }: BellScheduleModalProps) {
   const [slots, setSlots] = useState<InstitutionTimeSlot[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -47,36 +61,30 @@ export default function BellScheduleModal({
   const [newPeriodNumber, setNewPeriodNumber] = useState<number>(1);
   const [newStartTime, setNewStartTime] = useState<string>('08:00');
   const [newEndTime, setNewEndTime] = useState<string>('08:45');
+  const [newDayOfWeek, setNewDayOfWeek] = useState<string>('all');
 
   const fetchSlots = useCallback(async () => {
     if (!institutionCode) return;
     setIsLoading(true);
     try {
-      if (isSupabaseConfigured()) {
-        const supabase = createClient();
-        const { data, error } = await supabase
-          .from('institution_time_slots')
-          .select('*')
-          .eq('institution_code', institutionCode)
-          .order('period_number', { ascending: true });
-
-        if (error) {
-          console.warn('[BellScheduleModal] Could not fetch time slots from Supabase:', error);
-          // If table does not exist or error, keep local state
-        } else if (data) {
-          setSlots(data as InstitutionTimeSlot[]);
-          const nextPeriod = data.length > 0
-            ? Math.max(...data.map((s) => s.period_number)) + 1
+      const res = await getInstitutionTimeSlots(institutionCode);
+      if (res.success && res.data) {
+        setSlots(res.data);
+        onSlotsUpdated?.(res.data);
+        const nextPeriod =
+          res.data.length > 0
+            ? Math.max(...res.data.map((s) => s.period_number)) + 1
             : 1;
-          setNewPeriodNumber(nextPeriod);
-        }
+        setNewPeriodNumber(nextPeriod);
+      } else if (res.error) {
+        console.warn('[BellScheduleModal] Error fetching slots:', res.error);
       }
     } catch (err) {
       console.error('[BellScheduleModal] Error loading slots:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [institutionCode]);
+  }, [institutionCode, onSlotsUpdated]);
 
   useEffect(() => {
     if (isOpen && institutionCode) {
@@ -102,53 +110,35 @@ export default function BellScheduleModal({
     const normalizedEnd = normalizeTime(newEndTime);
 
     try {
-      if (isSupabaseConfigured()) {
-        const supabase = createClient();
-        const { data, error } = await supabase
-          .from('institution_time_slots')
-          .insert({
-            institution_code: institutionCode,
-            period_number: Number(newPeriodNumber),
-            start_time: normalizedStart,
-            end_time: normalizedEnd,
-          })
-          .select('*')
-          .maybeSingle();
+      const res = await addTimeSlot({
+        institution_code: institutionCode,
+        period_number: Number(newPeriodNumber),
+        start_time: normalizedStart,
+        end_time: normalizedEnd,
+        day_of_week: newDayOfWeek,
+      });
 
-        if (error) {
-          console.error('[BellScheduleModal] Insert error:', error);
-          onShowToast(`שגיאה בהוספת שיעור: ${error.message}`);
-          setIsSaving(false);
-          return;
-        }
-
-        if (data) {
-          setSlots((prev) =>
-            [...prev, data as InstitutionTimeSlot].sort(
-              (a, b) => a.period_number - b.period_number
-            )
-          );
-        }
-      } else {
-        // Demo / offline fallback
-        const demoSlot: InstitutionTimeSlot = {
-          id: `slot_${Date.now()}`,
-          institution_code: institutionCode,
-          period_number: Number(newPeriodNumber),
-          start_time: normalizedStart,
-          end_time: normalizedEnd,
-        };
-        setSlots((prev) =>
-          [...prev, demoSlot].sort((a, b) => a.period_number - b.period_number)
-        );
+      if (!res.success || !res.data) {
+        onShowToast(`שגיאה בהוספת שיעור: ${res.error || 'נא לנסות שוב'}`);
+        setIsSaving(false);
+        return;
       }
 
-      onShowToast(`שיעור ${newPeriodNumber} נוסף למערכת הצלצולים!`);
+      const updatedSlots = [...slots, res.data!].sort(
+        (a, b) => a.period_number - b.period_number
+      );
+      setSlots(updatedSlots);
+      onSlotsUpdated?.(updatedSlots);
+
+      const dayDesc =
+        newDayOfWeek === 'all' ? '' : ` (${getDayLabel(newDayOfWeek)})`;
+      onShowToast(`שיעור ${newPeriodNumber}${dayDesc} נוסף ללוח זמני השיעורים!`);
+
       const nextNum = Number(newPeriodNumber) + 1;
       setNewPeriodNumber(nextNum);
     } catch (err: any) {
       console.error('[BellScheduleModal] Add error:', err);
-      onShowToast('שגיאה בשמירת שיעור במערכת');
+      onShowToast('שגיאה בשמירת שיעור בלוח הזמנים');
     } finally {
       setIsSaving(false);
     }
@@ -157,23 +147,17 @@ export default function BellScheduleModal({
   const handleDeleteSlot = async (id: string, periodNumber: number) => {
     setDeletingId(id);
     try {
-      if (isSupabaseConfigured()) {
-        const supabase = createClient();
-        const { error } = await supabase
-          .from('institution_time_slots')
-          .delete()
-          .eq('id', id);
-
-        if (error) {
-          console.error('[BellScheduleModal] Delete error:', error);
-          onShowToast(`שגיאה במחיקת שיעור: ${error.message}`);
-          setDeletingId(null);
-          return;
-        }
+      const res = await deleteTimeSlot(id);
+      if (!res.success) {
+        onShowToast(`שגיאה במחיקת שיעור: ${res.error || 'נא לנסות שוב'}`);
+        setDeletingId(null);
+        return;
       }
 
-      setSlots((prev) => prev.filter((s) => s.id !== id));
-      onShowToast(`שיעור ${periodNumber} הוסר ממערכת הצלצולים`);
+      const updatedSlots = slots.filter((s) => s.id !== id);
+      setSlots(updatedSlots);
+      onSlotsUpdated?.(updatedSlots);
+      onShowToast(`שיעור ${periodNumber} הוסר מלוח זמני השיעורים`);
     } catch (err: any) {
       console.error('[BellScheduleModal] Delete error:', err);
       onShowToast('שגיאה במחיקת השיעור');
@@ -186,42 +170,16 @@ export default function BellScheduleModal({
     if (!institutionCode) return;
     setIsSaving(true);
     try {
-      if (isSupabaseConfigured()) {
-        const supabase = createClient();
-        const rowsToInsert = DEFAULT_BELL_PRESETS.map((p) => ({
-          institution_code: institutionCode,
-          period_number: p.period_number,
-          start_time: p.start_time,
-          end_time: p.end_time,
-        }));
-
-        const { data, error } = await supabase
-          .from('institution_time_slots')
-          .insert(rowsToInsert)
-          .select('*');
-
-        if (error) {
-          console.error('[BellScheduleModal] Presets insert error:', error);
-          onShowToast(`שגיאה בטעינת לוח זמנים: ${error.message}`);
-          setIsSaving(false);
-          return;
-        }
-
-        if (data) {
-          setSlots(data as InstitutionTimeSlot[]);
-        }
-      } else {
-        const demoSlots = DEFAULT_BELL_PRESETS.map((p, idx) => ({
-          id: `preset_${idx}`,
-          institution_code: institutionCode,
-          period_number: p.period_number,
-          start_time: p.start_time,
-          end_time: p.end_time,
-        }));
-        setSlots(demoSlots);
+      const res = await loadDefaultTimeSlots(institutionCode);
+      if (!res.success || !res.data) {
+        onShowToast(`שגיאה בטעינת לוח זמנים: ${res.error || 'נא לנסות שוב'}`);
+        setIsSaving(false);
+        return;
       }
 
-      onShowToast('לוח זמנים מומלץ נטען בהצלחה!');
+      setSlots(res.data);
+      onSlotsUpdated?.(res.data);
+      onShowToast('לוח זמני שיעורים מומלץ נטען בהצלחה!');
       setNewPeriodNumber(7);
     } catch (err: any) {
       console.error('[BellScheduleModal] Load presets error:', err);
@@ -237,16 +195,16 @@ export default function BellScheduleModal({
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs animate-in fade-in duration-200"
     >
-      <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/10">
+      <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 text-right">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-500/20">
-              <Bell className="h-5 w-5" />
+              <Calendar className="h-5 w-5" />
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-800">
-                מערכת צלצולים ושעות שיעורים
+                לוח זמני שיעורים (שעות קבועות)
               </h2>
               <p className="text-xs text-slate-500">
                 הגדרת זמני השיעורים הקבועים עבור מוסד {institutionCode || ''}
@@ -268,12 +226,12 @@ export default function BellScheduleModal({
           <div className="rounded-xl border border-indigo-100 bg-indigo-50/30 p-4">
             <h3 className="mb-3 text-xs font-bold text-indigo-900 flex items-center gap-1.5">
               <Plus className="h-4 w-4 text-indigo-600" />
-              <span>הוספת שיעור למערכת הצלצולים</span>
+              <span>הוספת שיעור ללוח הזמנים</span>
             </h3>
 
             <form
               onSubmit={handleAddSlot}
-              className="grid grid-cols-1 gap-3 sm:grid-cols-4 items-end"
+              className="grid grid-cols-1 gap-3 sm:grid-cols-5 items-end"
             >
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">
@@ -288,6 +246,23 @@ export default function BellScheduleModal({
                   required
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-indigo-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                  יום בשבוע
+                </label>
+                <select
+                  value={newDayOfWeek}
+                  onChange={(e) => setNewDayOfWeek(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-800 outline-none focus:border-indigo-500"
+                >
+                  {DAY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -361,7 +336,7 @@ export default function BellScheduleModal({
             ) : slots.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-8 text-center text-xs text-slate-500">
                 <p className="font-semibold text-slate-700 mb-1">
-                  טרם הוגדרו שיעורים במערכת הצלצולים
+                  טרם הוגדרו שיעורים בלוח הזמנים
                 </p>
                 <p className="text-slate-400 mb-3">
                   הוסף שיעורים באמצעות הטופס למעלה או טען לוח זמנים מומלץ
@@ -382,6 +357,7 @@ export default function BellScheduleModal({
                   <thead className="bg-slate-50 text-[11px] font-bold text-slate-600 border-b border-slate-200">
                     <tr>
                       <th className="px-4 py-2.5">שיעור</th>
+                      <th className="px-4 py-2.5">יום</th>
                       <th className="px-4 py-2.5">שעת התחלה</th>
                       <th className="px-4 py-2.5">שעת סיום</th>
                       <th className="px-4 py-2.5">משך</th>
@@ -399,6 +375,9 @@ export default function BellScheduleModal({
                           ? eh * 60 + em - (sh * 60 + sm)
                           : 45;
 
+                      const isSpecialDay =
+                        slot.day_of_week && slot.day_of_week !== 'all';
+
                       return (
                         <tr
                           key={slot.id}
@@ -408,6 +387,17 @@ export default function BellScheduleModal({
                             <span className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700 ring-1 ring-indigo-200/50">
                               שיעור {slot.period_number}
                             </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {isSpecialDay ? (
+                              <span className="inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+                                {getDayLabel(slot.day_of_week)}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                כל הימים
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-slate-700 font-medium">
                             {start}
@@ -459,4 +449,3 @@ export default function BellScheduleModal({
     </div>
   );
 }
-
