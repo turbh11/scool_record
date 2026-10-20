@@ -138,7 +138,7 @@ export default function BellScheduleModal({
       setNewPeriodNumber(nextNum);
     } catch (err: any) {
       console.error('[BellScheduleModal] Add error:', err);
-      onShowToast('שגיאה בשמירת שיעור בלוח הזמנים');
+      onShowToast(`שגיאה בשמירת שיעור בלוח הזמנים: ${err?.message || 'שגיאת תקשורת'}`);
     } finally {
       setIsSaving(false);
     }
@@ -160,7 +160,7 @@ export default function BellScheduleModal({
       onShowToast(`שיעור ${periodNumber} הוסר מלוח זמני השיעורים`);
     } catch (err: any) {
       console.error('[BellScheduleModal] Delete error:', err);
-      onShowToast('שגיאה במחיקת השיעור');
+      onShowToast(`שגיאה במחיקת השיעור: ${err?.message || 'שגיאת תקשורת'}`);
     } finally {
       setDeletingId(null);
     }
@@ -183,7 +183,7 @@ export default function BellScheduleModal({
       setNewPeriodNumber(7);
     } catch (err: any) {
       console.error('[BellScheduleModal] Load presets error:', err);
-      onShowToast('שגיאה בטעינת לוח זמנים');
+      onShowToast(`שגיאה בטעינת לוח זמנים: ${err?.message || 'שגיאת תקשורת'}`);
     } finally {
       setIsSaving(false);
     }

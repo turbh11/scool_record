@@ -632,6 +632,18 @@ export default function SuperAdminOnboardingPage() {
                       </td>
                       <td className="px-4 py-3.5 text-center">
                         <div className="flex items-center justify-center gap-2">
+                          {/* Enter Institution Dashboard Button */}
+                          <Link
+                            href={`/admin?institution=${encodeURIComponent(
+                              profile.institution_code
+                            )}`}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-700 shadow-2xs transition hover:bg-indigo-50 hover:border-indigo-300"
+                            title="מעבר ללוח הניהול של בית הספר"
+                          >
+                            <Building2 className="h-3.5 w-3.5 text-indigo-600" />
+                            <span>כניסה למוסד</span>
+                          </Link>
+
                           <button
                             type="button"
                             onClick={() =>

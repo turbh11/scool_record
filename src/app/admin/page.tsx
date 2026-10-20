@@ -37,11 +37,7 @@ import {
   isSupabaseConfigured,
 } from '@/lib/supabase/client';
 import {
-  createTeacherSafe,
-  saveScheduleTemplateSafe,
-  saveWeeklyReportSafe,
   seedDemoSchoolData,
-  updateTeacherSafe,
 } from '@/lib/supabase/reports-service';
 import {
   formatDateIsoLocal,
@@ -64,6 +60,15 @@ import {
 import { sendBulkMagicLinks } from '@/app/actions/email';
 import { getIsSuperAdmin } from '@/app/actions/auth';
 import { getInstitutionTimeSlots } from '@/app/actions/schedule-actions';
+import {
+  getAdminDashboardData,
+  saveTeacherAction,
+  deleteTeacherAction,
+  bulkDeleteTeachersAction,
+  saveScheduleTemplateAction,
+  deleteScheduleTemplateAction,
+  saveWeeklyReportOverrideAction,
+} from '@/app/actions/admin-dashboard-actions';
 import AdminHeader from '@/components/admin/AdminHeader';
 import KpiCards from '@/components/admin/KpiCards';
 import WeeklyTimeGrid from '@/components/admin/WeeklyTimeGrid';
@@ -94,6 +99,9 @@ export default function AdminDashboardPage() {
   const [reports, setReports] = useState<WeeklyActualReport[]>([]);
   const [institutionTimeSlots, setInstitutionTimeSlots] = useState<
     InstitutionTimeSlot[]
+  >([]);
+  const [availableSchools, setAvailableSchools] = useState<
+    { id: string; name: string; semel_mosad: string }[]
   >([]);
 
   // TASK 1: Scalable Search & Subject Filter State (replaces horizontal pill list for 70+ teachers)
@@ -149,7 +157,8 @@ export default function AdminDashboardPage() {
       weekStart: string,
       weekEnd: string,
       secondDayIso: string,
-      currentTodayIso: string
+      currentTodayIso: string,
+      institutionOverride?: string
     ) => {
       setReports([]);
 
@@ -168,244 +177,84 @@ export default function AdminDashboardPage() {
         return;
       }
 
-      const supabase = createClient();
-      let schoolData: School | null = null;
-
       try {
+        const supabase = createClient();
         const {
           data: { user },
         } = await supabase.auth.getUser();
 
-        let resolvedCode: string | null = null;
-        let resolvedSchoolName: string | null = null;
-
-        if (user?.id) {
-          if (user.email) {
-            setAdminEmail(user.email);
-          }
-          // Evaluate Super Admin status on server securely
-          try {
-            const isSuper = await getIsSuperAdmin();
-            setIsSuperAdmin(isSuper);
-          } catch {
-            setIsSuperAdmin(false);
-          }
-
-          // Extract school_name and institution_code from admin_profiles
-          const { data: adminProfile } = await supabase
-            .from('admin_profiles')
-            .select('*')
-            .eq('id', user.id)
-            .maybeSingle();
-
-          if (adminProfile && adminProfile.is_active === false) {
-            await supabase.auth.signOut();
-            router.push('/admin/login?error=account_frozen');
-            return;
-          }
-
-          if (adminProfile?.institution_code) {
-            resolvedCode = adminProfile.institution_code;
-          }
-          if (adminProfile?.school_name) {
-            resolvedSchoolName = adminProfile.school_name;
-          }
-
-          // Fall back to user metadata if profile record is still synchronizing
-          if (!resolvedCode && user.user_metadata?.institution_code) {
-            resolvedCode = user.user_metadata.institution_code;
-          }
-          if (!resolvedSchoolName && user.user_metadata?.school_name) {
-            resolvedSchoolName = user.user_metadata.school_name;
-          }
-
-          // Check schools table by admin_user_id
-          const { data: byAdmin } = await supabase
-            .from('schools')
-            .select('*')
-            .eq('admin_user_id', user.id)
-            .maybeSingle();
-          schoolData = byAdmin;
-
-          // If not found by admin_user_id, try matching by semel_mosad
-          if (!schoolData && resolvedCode) {
-            const { data: bySemel } = await supabase
-              .from('schools')
-              .select('*')
-              .eq('semel_mosad', resolvedCode)
-              .maybeSingle();
-
-            if (bySemel) {
-              schoolData = bySemel;
-              if (!bySemel.admin_user_id) {
-                await supabase
-                  .from('schools')
-                  .update({ admin_user_id: user.id })
-                  .eq('id', bySemel.id);
-              }
-            }
-          }
-
-          // Auto-provision school record if not present
-          if (!schoolData && (resolvedSchoolName || resolvedCode)) {
-            const { data: createdSchool } = await supabase
-              .from('schools')
-              .insert({
-                name: resolvedSchoolName || 'בית ספר',
-                semel_mosad: resolvedCode || '',
-                admin_user_id: user.id,
-              })
-              .select('*')
-              .maybeSingle();
-
-            if (createdSchool) {
-              schoolData = createdSchool as School;
-            }
-          }
-
-          // Keep school name and institution_code in sync with admin_profile
-          if (
-            schoolData &&
-            resolvedSchoolName &&
-            schoolData.name !== resolvedSchoolName
-          ) {
-            schoolData = {
-              ...schoolData,
-              name: resolvedSchoolName,
-              semel_mosad: resolvedCode || schoolData.semel_mosad,
-            };
-            await supabase
-              .from('schools')
-              .update({ name: resolvedSchoolName })
-              .eq('id', schoolData.id);
-          }
-
-          // If still no school record in DB, guarantee a valid UUID format
-          if (!schoolData) {
-            const { data: existingAny } = await supabase
-              .from('schools')
-              .select('*')
-              .limit(1)
-              .maybeSingle();
-
-            if (existingAny) {
-              schoolData = {
-                ...existingAny,
-                name: resolvedSchoolName || existingAny.name,
-                semel_mosad: resolvedCode || existingAny.semel_mosad,
-              };
-            } else {
-              schoolData = {
-                id: user.id,
-                created_at: new Date().toISOString(),
-                name: resolvedSchoolName || 'בית ספר',
-                semel_mosad: resolvedCode || '',
-                admin_user_id: user.id,
-              };
-            }
-          }
+        let targetCode: string | null = institutionOverride || null;
+        if (!targetCode && typeof window !== 'undefined') {
+          const urlParams = new URLSearchParams(window.location.search);
+          targetCode =
+            urlParams.get('institution') ||
+            localStorage.getItem('admin_selected_institution');
         }
 
-        if (!resolvedCode && schoolData?.semel_mosad) {
-          resolvedCode = schoolData.semel_mosad;
-        }
-
-        setAdminInstitutionCode(resolvedCode);
-
-        if (!schoolData) {
-          setSchool(null);
-          setTeachers([]);
-          setTemplates([]);
-          setReports([]);
-          setIsUsingFallback(false);
-          setInitialLoaded(true);
-          return;
-        }
-
-        setSchool(schoolData);
-        setIsUsingFallback(false);
-
-        let teachersQuery = supabase
-          .from('teachers')
-          .select('*')
-          .eq('school_id', schoolData.id);
-
-        if (resolvedCode) {
-          teachersQuery = teachersQuery.or(
-            `institution_code.eq.${resolvedCode},institution_code.is.null`
-          );
-        }
-
-        const { data: teachersList } = await teachersQuery.order('name', {
-          ascending: true,
+        const dataRes = await getAdminDashboardData({
+          userId: user?.id || null,
+          email: user?.email || null,
+          selectedInstitutionCode: targetCode,
+          weekStart,
+          weekEnd,
         });
 
-        const activeTeachers = (teachersList || []) as Teacher[];
-        setTeachers(activeTeachers);
-
-        const teacherIds = activeTeachers.map((t) => t.id);
-        if (teacherIds.length === 0) {
-          setTemplates([]);
-          setReports([]);
-          setInitialLoaded(true);
+        if (dataRes.isFrozen) {
+          await supabase.auth.signOut();
+          router.push('/admin/login?error=account_frozen');
           return;
         }
 
-        let templatesQuery = supabase
-          .from('schedule_templates')
-          .select('*')
-          .in('teacher_id', teacherIds);
-
-        if (resolvedCode) {
-          templatesQuery = templatesQuery.or(
-            `institution_code.eq.${resolvedCode},institution_code.is.null`
-          );
-        }
-
-        let reportsQuery = supabase
-          .from('weekly_actual_reports')
-          .select('*')
-          .in('teacher_id', teacherIds)
-          .gte('report_date', weekStart)
-          .lte('report_date', weekEnd);
-
-        if (resolvedCode) {
-          reportsQuery = reportsQuery.or(
-            `institution_code.eq.${resolvedCode},institution_code.is.null`
-          );
-        }
-
-        const [templatesRes, reportsRes, slotsRes] = await Promise.all([
-          templatesQuery,
-          reportsQuery,
-          resolvedCode
-            ? getInstitutionTimeSlots(resolvedCode)
-            : Promise.resolve({ success: true, data: [] }),
-        ]);
-
-        const strictlyFilteredReports = (
-          (reportsRes.data || []) as WeeklyActualReport[]
-        ).filter((r) => r.report_date >= weekStart && r.report_date <= weekEnd);
-
-        setTemplates((templatesRes.data || []) as ScheduleTemplate[]);
-        setReports(strictlyFilteredReports);
-        if (slotsRes?.success && slotsRes.data) {
-          setInstitutionTimeSlots(slotsRes.data);
+        if (dataRes.success) {
+          setIsSuperAdmin(dataRes.isSuperAdmin);
+          setSchool(dataRes.school);
+          setAdminInstitutionCode(dataRes.adminInstitutionCode);
+          setAdminEmail(dataRes.adminEmail || user?.email || null);
+          setTeachers(dataRes.teachers);
+          setTemplates(dataRes.templates);
+          setReports(dataRes.reports);
+          setInstitutionTimeSlots(dataRes.timeSlots);
+          setIsUsingFallback(false);
+          if (dataRes.availableSchools && dataRes.availableSchools.length > 0) {
+            setAvailableSchools(dataRes.availableSchools);
+          }
+          if (dataRes.adminInstitutionCode && typeof window !== 'undefined') {
+            localStorage.setItem(
+              'admin_selected_institution',
+              dataRes.adminInstitutionCode
+            );
+          }
         }
       } catch (err) {
-        console.error('Error loading admin dashboard:', err);
-        if (schoolData) {
-          setSchool(schoolData);
-        }
-        setTeachers([]);
-        setTemplates([]);
-        setReports([]);
-        setIsUsingFallback(false);
+        console.error('Error loading admin dashboard via Server Action:', err);
       } finally {
         setInitialLoaded(true);
       }
     },
-    []
+    [router]
+  );
+
+  const handleSelectSchool = useCallback(
+    (semel: string) => {
+      setAdminInstitutionCode(semel);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('admin_selected_institution', semel);
+        const url = new URL(window.location.href);
+        url.searchParams.set('institution', semel);
+        window.history.pushState({}, '', url.toString());
+      }
+      if (referenceDate && todayIso) {
+        const wk = getIsraeliSchoolWeek(referenceDate, weekOffset);
+        fetchDashboardData(
+          wk.sundayIso,
+          wk.fridayIso,
+          wk.days[1]?.dateIso || wk.sundayIso,
+          todayIso,
+          semel
+        );
+      }
+    },
+    [referenceDate, weekOffset, todayIso, fetchDashboardData]
   );
 
   useEffect(() => {
@@ -864,8 +713,7 @@ export default function AdminDashboardPage() {
     setActiveSessionModal(null);
 
     if (isSupabaseConfigured() && !isUsingFallback) {
-      const supabase = createClient();
-      const { data: savedRow, error } = await saveWeeklyReportSafe(supabase, {
+      const res = await saveWeeklyReportOverrideAction({
         teacher_id: session.teacher_id,
         template_id: session.template_id,
         report_date: session.report_date,
@@ -878,9 +726,10 @@ export default function AdminDashboardPage() {
         institution_code: effectiveCode,
       });
 
-      if (error) {
+      if (!res.success || !res.data) {
         showToast('שגיאה בשמירה במסד הנתונים, השינוי נשמר מקומית');
-      } else if (savedRow) {
+      } else {
+        const savedRow = res.data;
         setReports((prev) =>
           prev.map((r) =>
             r.report_date === savedRow.report_date &&
@@ -935,114 +784,30 @@ export default function AdminDashboardPage() {
     payload: TeacherFormPayload,
     options?: { silent?: boolean }
   ): Promise<Teacher | null> => {
-    const generatedToken = `${(payload.name || 'teacher')
-      .replace(/\s+/g, '-')
-      .slice(0, 10)}-${Math.random().toString(36).substring(2, 8)}-${Date.now().toString(36)}`;
-
     const effectiveCode = adminInstitutionCode || school?.semel_mosad || null;
+    const targetSchoolId = school?.id;
 
-    if (isSupabaseConfigured() && !isUsingFallback) {
-      const supabase = createClient();
-
-      // Ensure valid school_id UUID that actually exists in public.schools
-      let verifiedSchoolId: string | null = null;
-      const targetSchoolId = school?.id;
-      const isUuid =
-        targetSchoolId &&
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-          targetSchoolId
-        );
-
-      if (isUuid) {
-        const { data: sCheck } = await supabase
-          .from('schools')
-          .select('id')
-          .eq('id', targetSchoolId)
-          .maybeSingle();
-        if (sCheck?.id) {
-          verifiedSchoolId = sCheck.id;
-        }
-      }
-
-      if (!verifiedSchoolId) {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        let dbSchool: School | null = null;
-        if (user?.id) {
-          const { data: s1 } = await supabase
-            .from('schools')
-            .select('*')
-            .eq('admin_user_id', user.id)
-            .maybeSingle();
-          dbSchool = s1;
-        }
-        if (!dbSchool && effectiveCode) {
-          const { data: s2 } = await supabase
-            .from('schools')
-            .select('*')
-            .eq('semel_mosad', effectiveCode)
-            .maybeSingle();
-          dbSchool = s2;
-        }
-        if (!dbSchool) {
-          const { data: s3 } = await supabase
-            .from('schools')
-            .select('*')
-            .limit(1)
-            .maybeSingle();
-          dbSchool = s3;
-        }
-        if (!dbSchool) {
-          const { data: newSchool, error: schoolErr } = await supabase
-            .from('schools')
-            .insert({
-              name: school?.name || 'בית ספר',
-              semel_mosad: effectiveCode || '',
-              admin_user_id: user?.id || null,
-            })
-            .select('*')
-            .maybeSingle();
-          if (schoolErr) {
-            console.error('[DB ERROR]: Failed to create fallback school row in DB:', schoolErr);
-          } else if (newSchool) {
-            dbSchool = newSchool;
-          }
-        }
-        if (dbSchool) {
-          verifiedSchoolId = dbSchool.id;
-          setSchool(dbSchool);
-        }
-      }
-
-      if (!verifiedSchoolId) {
-        console.error('[DB ERROR]: No valid school record found or could be created in Supabase.');
-        showToast('שגיאה: לא נמצא מזהה בית ספר תקין במסד הנתונים');
-        return null;
-      }
-
-      const { data: inserted, error } = await createTeacherSafe(supabase, {
-        school_id: verifiedSchoolId,
+    if (isSupabaseConfigured() && !isUsingFallback && targetSchoolId) {
+      const res = await saveTeacherAction({
+        school_id: targetSchoolId,
         name: payload.name,
         subject: payload.subject,
         id_number: payload.id_number || null,
         phone: payload.phone || null,
         email: payload.email || null,
-        magic_token: generatedToken,
         institution_code: effectiveCode,
       });
 
-      if (error || !inserted) {
-        console.error('[DB ERROR]: Error inserting teacher in handleAddTeacher:', error);
-        showToast(`שגיאה בהוספת המורה: ${error?.message || 'שגיאה במסד הנתונים'}`);
+      if (!res.success || !res.data) {
+        showToast(`שגיאה בהוספת המורה: ${res.error || 'נא לנסות שוב'}`);
         return null;
       }
 
-      setTeachers((prev) => [...prev, inserted]);
+      setTeachers((prev) => [...prev, res.data!]);
       if (!options?.silent) {
         showToast(`המורה ${payload.name} נוסף/ה בהצלחה!`);
       }
-      return inserted;
+      return res.data;
     } else {
       const localTeacher: Teacher = {
         id: `local-teacher-${Date.now()}-${Math.random()
@@ -1055,7 +820,9 @@ export default function AdminDashboardPage() {
         id_number: payload.id_number || null,
         phone: payload.phone || null,
         email: payload.email || null,
-        magic_token: generatedToken,
+        magic_token: `token-${Date.now()}-${Math.random()
+          .toString(36)
+          .substring(2, 8)}`,
         auth_user_id: null,
         institution_code: effectiveCode,
       };
@@ -1072,6 +839,7 @@ export default function AdminDashboardPage() {
     payload: TeacherFormPayload
   ) => {
     const effectiveCode = adminInstitutionCode || school?.semel_mosad || null;
+    const targetSchoolId = school?.id || '';
 
     setTeachers((prev) =>
       prev.map((t) =>
@@ -1092,9 +860,10 @@ export default function AdminDashboardPage() {
       )
     );
 
-    if (isSupabaseConfigured() && !isUsingFallback) {
-      const supabase = createClient();
-      const { error } = await updateTeacherSafe(supabase, teacherId, {
+    if (isSupabaseConfigured() && !isUsingFallback && targetSchoolId) {
+      const res = await saveTeacherAction({
+        id: teacherId,
+        school_id: targetSchoolId,
         name: payload.name,
         subject: payload.subject,
         id_number: payload.id_number || null,
@@ -1103,8 +872,8 @@ export default function AdminDashboardPage() {
         institution_code: effectiveCode,
       });
 
-      if (error) {
-        showToast('שגיאה בעדכון פרטי המורה בשרת');
+      if (!res.success) {
+        showToast(`שגיאה בעדכון פרטי המורה: ${res.error || 'שגיאת שרת'}`);
         return;
       }
     }
@@ -1117,18 +886,10 @@ export default function AdminDashboardPage() {
     setReports((prev) => prev.filter((r) => r.teacher_id !== teacherId));
 
     if (isSupabaseConfigured() && !isUsingFallback) {
-      const supabase = createClient();
       const effectiveCode = adminInstitutionCode || school?.semel_mosad;
-      let delQuery = supabase.from('teachers').delete().eq('id', teacherId);
-      if (effectiveCode) {
-        delQuery = delQuery.or(
-          `institution_code.eq.${effectiveCode},institution_code.is.null`
-        );
-      }
-      const { error } = await delQuery;
-      if (error) {
-        console.error('[DB ERROR]: Failed to delete teacher:', error);
-        showToast('שגיאה במחיקה ממסד הנתונים');
+      const res = await deleteTeacherAction(teacherId, effectiveCode);
+      if (!res.success) {
+        showToast(`שגיאה במחיקת המורה: ${res.error || 'שגיאת שרת'}`);
         return;
       }
     }
@@ -1147,22 +908,13 @@ export default function AdminDashboardPage() {
     );
 
     if (isSupabaseConfigured() && !isUsingFallback) {
-      const supabase = createClient();
       const effectiveCode = adminInstitutionCode || school?.semel_mosad;
-      let delQuery = supabase.from('teachers').delete().in('id', teacherIds);
-      if (effectiveCode) {
-        delQuery = delQuery.or(
-          `institution_code.eq.${effectiveCode},institution_code.is.null`
-        );
-      }
-      const { error } = await delQuery;
-      if (error) {
-        console.error('[DB ERROR]: Failed to bulk delete teachers:', error);
-        showToast('שגיאה במחיקה ממסד הנתונים');
+      const res = await bulkDeleteTeachersAction(teacherIds, effectiveCode);
+      if (!res.success) {
+        showToast(`שגיאה במחיקה ממסד הנתונים: ${res.error || 'שגיאת שרת'}`);
         return;
       }
     }
-
     showToast(`נמחקו בהצלחה ${teacherIds.length} מורים וכל משבצות השעה שלהם`);
   };
 
@@ -1181,91 +933,40 @@ export default function AdminDashboardPage() {
   ): Promise<ScheduleTemplate | null> => {
     const effectiveCode = adminInstitutionCode || school?.semel_mosad || null;
 
-    if (templateData.id) {
-      if (isSupabaseConfigured() && !isUsingFallback) {
-        const supabase = createClient();
-        const { data: updated, error } = await saveScheduleTemplateSafe(supabase, {
-          id: templateData.id,
-          teacher_id: teacherId,
-          day_of_week: templateData.day_of_week,
-          start_time: templateData.start_time,
-          duration_minutes: templateData.duration_minutes,
-          subject: templateData.subject,
-          class_name: templateData.class_name ?? null,
-          institution_code: effectiveCode,
-          period_number: templateData.period_number ?? null,
-        });
+    if (isSupabaseConfigured() && !isUsingFallback) {
+      const res = await saveScheduleTemplateAction({
+        id: templateData.id,
+        teacher_id: teacherId,
+        day_of_week: templateData.day_of_week,
+        start_time: templateData.start_time,
+        duration_minutes: templateData.duration_minutes,
+        subject: templateData.subject,
+        class_name: templateData.class_name ?? null,
+        institution_code: effectiveCode,
+        period_number: templateData.period_number ?? null,
+      });
 
-        if (error || !updated) {
-          console.error('[DB ERROR]: Error updating schedule template in handleSaveTemplate:', error);
-          showToast(`שגיאה בעדכון משבצת שעה: ${error?.message || 'שגיאה במסד הנתונים'}`);
-          return null;
-        }
+      if (!res.success || !res.data) {
+        showToast(`שגיאה בשמירת משבצת שעה: ${res.error || 'שגיאת שרת'}`);
+        return null;
+      }
 
+      const saved = res.data;
+      if (templateData.id) {
         setTemplates((prev) =>
-          prev.map((tpl) => (tpl.id === templateData.id ? updated : tpl))
+          prev.map((tpl) => (tpl.id === saved.id ? saved : tpl))
         );
-        if (!options?.silent) {
-          showToast('משבצת השעה הפרטנית עודכנה');
-        }
-        return updated;
+        if (!options?.silent) showToast('משבצת השעה הפרטנית עודכנה');
+      } else {
+        setTemplates((prev) => [...prev, saved]);
+        if (!options?.silent) showToast('משבצת שעה פרטנית נוספה למערכת!');
       }
-
-      let updatedLocal: ScheduleTemplate | null = null;
-      setTemplates((prev) =>
-        prev.map((tpl) => {
-          if (tpl.id === templateData.id) {
-            updatedLocal = {
-              ...tpl,
-              day_of_week: templateData.day_of_week,
-              start_time: templateData.start_time,
-              duration_minutes: templateData.duration_minutes,
-              subject: templateData.subject,
-              class_name: templateData.class_name ?? null,
-              institution_code: tpl.institution_code || effectiveCode,
-              period_number: templateData.period_number ?? tpl.period_number ?? null,
-            };
-            return updatedLocal;
-          }
-          return tpl;
-        })
-      );
-      if (!options?.silent) {
-        showToast('משבצת השעה הפרטנית עודכנה');
-      }
-      return updatedLocal;
+      return saved;
     } else {
-      if (isSupabaseConfigured() && !isUsingFallback) {
-        const supabase = createClient();
-        const { data: inserted, error } = await saveScheduleTemplateSafe(
-          supabase,
-          {
-            teacher_id: teacherId,
-            day_of_week: templateData.day_of_week,
-            start_time: templateData.start_time,
-            duration_minutes: templateData.duration_minutes,
-            subject: templateData.subject,
-            class_name: templateData.class_name ?? null,
-            institution_code: effectiveCode,
-            period_number: templateData.period_number ?? null,
-          }
-        );
-
-        if (error || !inserted) {
-          console.error('[DB ERROR]: Error inserting schedule template in handleSaveTemplate:', error);
-          showToast(`שגיאה בהוספת משבצת שעה: ${error?.message || 'שגיאה במסד הנתונים'}`);
-          return null;
-        }
-
-        setTemplates((prev) => [...prev, inserted]);
-        if (!options?.silent) {
-          showToast('משבצת שעה פרטנית נוספה למערכת!');
-        }
-        return inserted;
-      }
-
       const localTpl: ScheduleTemplate = {
-        id: `local-tpl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id:
+          templateData.id ||
+          `local-tpl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         teacher_id: teacherId,
         day_of_week: templateData.day_of_week,
         start_time: templateData.start_time,
@@ -1275,9 +976,14 @@ export default function AdminDashboardPage() {
         institution_code: effectiveCode,
         period_number: templateData.period_number ?? null,
       };
-      setTemplates((prev) => [...prev, localTpl]);
-      if (!options?.silent) {
-        showToast('משבצת שעה פרטנית נוספה למערכת!');
+      if (templateData.id) {
+        setTemplates((prev) =>
+          prev.map((tpl) => (tpl.id === localTpl.id ? localTpl : tpl))
+        );
+        if (!options?.silent) showToast('משבצת השעה הפרטנית עודכנה');
+      } else {
+        setTemplates((prev) => [...prev, localTpl]);
+        if (!options?.silent) showToast('משבצת שעה פרטנית נוספה למערכת!');
       }
       return localTpl;
     }
@@ -1286,21 +992,10 @@ export default function AdminDashboardPage() {
   const handleDeleteTemplate = async (templateId: string) => {
     setTemplates((prev) => prev.filter((tpl) => tpl.id !== templateId));
     if (isSupabaseConfigured() && !isUsingFallback) {
-      const supabase = createClient();
       const effectiveCode = adminInstitutionCode || school?.semel_mosad;
-      let delQuery = supabase
-        .from('schedule_templates')
-        .delete()
-        .eq('id', templateId);
-      if (effectiveCode) {
-        delQuery = delQuery.or(
-          `institution_code.eq.${effectiveCode},institution_code.is.null`
-        );
-      }
-      const { error } = await delQuery;
-      if (error) {
-        console.error('[DB ERROR]: Failed to delete template:', error);
-        showToast('שגיאה במחיקה ממסד הנתונים');
+      const res = await deleteScheduleTemplateAction(templateId, effectiveCode);
+      if (!res.success) {
+        showToast(`שגיאה במחיקת משבצת שעה: ${res.error || 'שגיאת שרת'}`);
         return;
       }
     }
@@ -1758,6 +1453,8 @@ export default function AdminDashboardPage() {
               isSuperAdmin={isSuperAdmin}
               onSwitchToTeacher={handleSwitchToTeacher}
               isSwitchingToTeacher={isSwitchingToTeacher}
+              availableSchools={availableSchools}
+              onSelectSchool={handleSelectSchool}
             />
           </div>
         </div>

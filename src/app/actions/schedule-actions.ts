@@ -161,6 +161,26 @@ export async function addTimeSlot(
       .select('*')
       .single();
 
+    if (error && error.code === '23505') {
+      // Slot already exists for this institution and period_number: update its times and day_of_week
+      const updateRes = await supabaseAdmin
+        .from('institution_time_slots')
+        .update({
+          start_time: normalizedStart,
+          end_time: normalizedEnd,
+          day_of_week: dayOfWeek,
+        })
+        .eq('institution_code', cleanCode)
+        .eq('period_number', Number(payload.period_number))
+        .select('*')
+        .single();
+
+      if (!updateRes.error && updateRes.data) {
+        return { success: true, data: updateRes.data as InstitutionTimeSlot };
+      }
+      error = updateRes.error || error;
+    }
+
     if (error && (error.code === '42501' || error.message?.includes('permission denied'))) {
       const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
       if (anonKey) {
@@ -175,6 +195,22 @@ export async function addTimeSlot(
           .single();
         data = fbRes.data;
         error = fbRes.error;
+
+        if (error && error.code === '23505') {
+          const fbUpdate = await fallbackClient
+            .from('institution_time_slots')
+            .update({
+              start_time: normalizedStart,
+              end_time: normalizedEnd,
+              day_of_week: dayOfWeek,
+            })
+            .eq('institution_code', cleanCode)
+            .eq('period_number', Number(payload.period_number))
+            .select('*')
+            .single();
+          data = fbUpdate.data;
+          error = fbUpdate.error;
+        }
       }
     }
 
@@ -288,8 +324,24 @@ export async function loadDefaultTimeSlots(
 
     let { data, error } = await supabaseAdmin
       .from('institution_time_slots')
-      .insert(rowsToInsert)
+      .upsert(rowsToInsert, { onConflict: 'institution_code,period_number' })
       .select('*');
+
+    if (error && error.code === '23505') {
+      // If constraint definition differs, safely delete existing default periods and re-insert
+      await supabaseAdmin
+        .from('institution_time_slots')
+        .delete()
+        .eq('institution_code', cleanCode)
+        .in('period_number', [1, 2, 3, 4, 5, 6]);
+
+      const retryRes = await supabaseAdmin
+        .from('institution_time_slots')
+        .insert(rowsToInsert)
+        .select('*');
+      data = retryRes.data;
+      error = retryRes.error;
+    }
 
     if (error && (error.code === '42501' || error.message?.includes('permission denied'))) {
       const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
@@ -300,7 +352,7 @@ export async function loadDefaultTimeSlots(
         );
         const fbRes = await fallbackClient
           .from('institution_time_slots')
-          .insert(rowsToInsert)
+          .upsert(rowsToInsert, { onConflict: 'institution_code,period_number' })
           .select('*');
         data = fbRes.data;
         error = fbRes.error;

@@ -188,6 +188,9 @@ CREATE TABLE IF NOT EXISTS public.institution_time_slots (
 );
 
 ALTER TABLE public.institution_time_slots ADD COLUMN IF NOT EXISTS day_of_week TEXT DEFAULT 'all';
+ALTER TABLE public.institution_time_slots DROP CONSTRAINT IF EXISTS institution_time_slots_institution_code_period_number_key;
+ALTER TABLE public.institution_time_slots DROP CONSTRAINT IF EXISTS institution_time_slots_institution_code_period_day_key;
+ALTER TABLE public.institution_time_slots ADD CONSTRAINT institution_time_slots_institution_code_period_day_key UNIQUE (institution_code, period_number, day_of_week);
 ALTER TABLE public.schedule_templates ADD COLUMN IF NOT EXISTS period_number INT;
 ALTER TABLE public.weekly_actual_reports ADD COLUMN IF NOT EXISTS period_number INT;
 

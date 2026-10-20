@@ -13,6 +13,8 @@ export interface AdminHeaderProps {
   isSuperAdmin?: boolean;
   onSwitchToTeacher?: () => void;
   isSwitchingToTeacher?: boolean;
+  availableSchools?: { id: string; name: string; semel_mosad: string }[];
+  onSelectSchool?: (semel_mosad: string) => void;
 }
 
 export default function AdminHeader({
@@ -22,6 +24,8 @@ export default function AdminHeader({
   isSuperAdmin = false,
   onSwitchToTeacher,
   isSwitchingToTeacher = false,
+  availableSchools = [],
+  onSelectSchool,
 }: AdminHeaderProps) {
   const router = useRouter();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -48,15 +52,34 @@ export default function AdminHeader({
       {(schoolName || institutionCode) && (
         <div className="hidden sm:flex items-center gap-2 rounded-xl border border-indigo-100 bg-white/90 px-3 py-1.5 shadow-sm backdrop-blur-md">
           <Building2 className="h-4 w-4 text-indigo-600 shrink-0" />
-          {schoolName && (
-            <span className="text-xs sm:text-sm font-bold text-slate-800">
-              {schoolName}
-            </span>
-          )}
-          {institutionCode && (
-            <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-700">
-              מוסד: {institutionCode}
-            </span>
+          {isSuperAdmin && availableSchools && availableSchools.length > 1 ? (
+            <div className="flex items-center gap-2">
+              <select
+                value={institutionCode || ''}
+                onChange={(e) => onSelectSchool?.(e.target.value)}
+                className="bg-transparent text-xs sm:text-sm font-bold text-slate-800 outline-none cursor-pointer hover:text-indigo-600"
+                title="בחר מוסד להצגה (Super Admin)"
+              >
+                {availableSchools.map((s) => (
+                  <option key={s.id} value={s.semel_mosad}>
+                    {s.name} ({s.semel_mosad})
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <>
+              {schoolName && (
+                <span className="text-xs sm:text-sm font-bold text-slate-800">
+                  {schoolName}
+                </span>
+              )}
+              {institutionCode && (
+                <span className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-[11px] font-bold text-indigo-700">
+                  מוסד: {institutionCode}
+                </span>
+              )}
+            </>
           )}
         </div>
       )}
