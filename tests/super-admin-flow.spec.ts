@@ -4,8 +4,8 @@ test.describe('Super Admin Flow', () => {
   test('Super Admin Dashboard, School Management & Switcher', async ({ page }) => {
     // 1. Login as Super Admin
     await page.goto('/admin/login');
-    const testEmail = process.env.TEST_ADMIN_EMAIL || 'enterhere';
-    const testPassword = process.env.TEST_ADMIN_PASSWORD || 'enterhere';
+    const testEmail = process.env.TEST_ADMIN_EMAIL || 'barakbenacon@gmail.com';
+    const testPassword = process.env.TEST_ADMIN_PASSWORD || '0508445663';
 
     const emailInput = page.locator('#admin-login-email');
     await expect(emailInput).toBeVisible({ timeout: 10000 });

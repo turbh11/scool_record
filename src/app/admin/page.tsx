@@ -58,6 +58,7 @@ import {
   downloadTeacherImportTemplate,
   normalizeTimeToHHMM,
 } from '@/lib/excel';
+import { DEFAULT_BELL_PRESETS } from '@/lib/constants/bell-schedule';
 import { sendBulkMagicLinks } from '@/app/actions/email';
 import { getIsSuperAdmin } from '@/app/actions/auth';
 import { getInstitutionTimeSlots } from '@/app/actions/schedule-actions';
@@ -1055,11 +1056,16 @@ export default function AdminDashboardPage() {
 
       for (const row of parsedRows) {
         const rowName = row.name.trim();
-        const rowEmail = row.email ? row.email.trim().toLowerCase() : '';
+        const rawEmail = row.email ? row.email.trim() : '';
+        // Only accept real email format; if user enters dummy text like "ששש" or leaves blank, treat as undefined
+        const isValidEmail = (e?: string) => !!e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+        const validEmail = isValidEmail(rawEmail) ? rawEmail.toLowerCase() : undefined;
         const rowIdNumber = row.id_number ? row.id_number.trim() : '';
+        const cleanPhone = (p?: string | null) => (p ? p.replace(/\D/g, '') : '');
+        const rowPhoneClean = cleanPhone(row.phone);
 
         // Prevent Teacher Duplicates:
-        // Check if teacher with same id_number, email, or name exists for this institution
+        // Match if teacher exists with same ID, matching valid email, matching phone, or matching name
         let targetTeacher = currentTeachers.find((t) => {
           const tInst = t.institution_code || effectiveCode;
           if (effectiveCode && tInst && tInst !== effectiveCode) {
@@ -1073,9 +1079,16 @@ export default function AdminDashboardPage() {
             return true;
           }
           if (
-            rowEmail &&
+            validEmail &&
             t.email &&
-            t.email.trim().toLowerCase() === rowEmail
+            t.email.trim().toLowerCase() === validEmail
+          ) {
+            return true;
+          }
+          if (
+            rowPhoneClean &&
+            t.phone &&
+            cleanPhone(t.phone) === rowPhoneClean
           ) {
             return true;
           }
@@ -1088,11 +1101,11 @@ export default function AdminDashboardPage() {
         if (!targetTeacher) {
           const created = await handleAddTeacher(
             {
-              name: row.name,
-              subject: row.subject,
-              id_number: row.id_number,
-              phone: row.phone,
-              email: row.email,
+              name: row.name.trim(),
+              subject: row.subject.trim() || 'כללי',
+              id_number: rowIdNumber || undefined,
+              phone: row.phone?.trim() || undefined,
+              email: validEmail,
             },
             { silent: true }
           );
@@ -1105,18 +1118,46 @@ export default function AdminDashboardPage() {
           }
         }
 
-        // Prevent Schedule Duplicates & Normalize Start Time
-        if (targetTeacher && row.day_of_week && row.start_time) {
-          const normalizedStartTime =
-            normalizeTimeToHHMM(row.start_time) || row.start_time.slice(0, 5);
+        // Resolve Start Time & Duration:
+        // If user didn't enter start_time, but entered period_number, resolve it from bell schedule!
+        let effectiveStartTime = row.start_time
+          ? (normalizeTimeToHHMM(row.start_time) || row.start_time.slice(0, 5))
+          : undefined;
+        let effectiveDuration = row.duration_minutes || 45;
+        let effectivePeriodNumber = row.period_number ?? null;
 
-          // Check if slot with same teacher_id, day_of_week, and start_time already exists
+        if (!effectiveStartTime && effectivePeriodNumber) {
+          const dayStr = row.day_of_week ? String(row.day_of_week) : 'all';
+          const matchedSlot =
+            institutionTimeSlots.find(
+              (s) =>
+                s.period_number === effectivePeriodNumber &&
+                (s.day_of_week === dayStr || s.day_of_week === 'all')
+            ) ||
+            institutionTimeSlots.find((s) => s.period_number === effectivePeriodNumber) ||
+            DEFAULT_BELL_PRESETS.find((p) => p.period_number === effectivePeriodNumber);
+
+          if (matchedSlot) {
+            effectiveStartTime =
+              normalizeTimeToHHMM(matchedSlot.start_time) ||
+              matchedSlot.start_time.slice(0, 5);
+            const [sh, sm] = matchedSlot.start_time.split(':').map(Number);
+            const [eh, em] = matchedSlot.end_time.split(':').map(Number);
+            if (!isNaN(sh) && !isNaN(sm) && !isNaN(eh) && !isNaN(em)) {
+              const diff = eh * 60 + em - (sh * 60 + sm);
+              if (diff > 0) effectiveDuration = diff;
+            }
+          }
+        }
+
+        // Prevent Schedule Duplicates & Save Slot
+        if (targetTeacher && row.day_of_week && effectiveStartTime) {
           const isDuplicateSlot = currentTemplates.some(
             (tpl) =>
               tpl.teacher_id === targetTeacher!.id &&
               tpl.day_of_week === row.day_of_week &&
-              (normalizeTimeToHHMM(tpl.start_time) === normalizedStartTime ||
-                tpl.start_time.slice(0, 5) === normalizedStartTime)
+              (normalizeTimeToHHMM(tpl.start_time) === effectiveStartTime ||
+                tpl.start_time.slice(0, 5) === effectiveStartTime)
           );
 
           if (isDuplicateSlot) {
@@ -1128,11 +1169,11 @@ export default function AdminDashboardPage() {
             targetTeacher.id,
             {
               day_of_week: row.day_of_week,
-              start_time: normalizedStartTime,
-              duration_minutes: row.duration_minutes || 45,
+              start_time: effectiveStartTime,
+              duration_minutes: effectiveDuration,
               subject: row.template_subject || row.subject,
               class_name: row.class_name || null,
-              period_number: row.period_number ?? null,
+              period_number: effectivePeriodNumber,
             },
             { silent: true }
           );
