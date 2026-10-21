@@ -223,4 +223,43 @@ test.describe('Admin Dashboard Flow', () => {
     await expect(currentWeekBtn).toBeVisible();
     await currentWeekBtn.click();
   });
+
+  test('Test 5: Multi-Admin Institution Synchronization (438466) & Deduplicated School Switcher', async ({
+    page,
+  }) => {
+    await page.goto('/admin/login');
+    const testEmail = process.env.TEST_ADMIN_EMAIL || 'barakbenacon@gmail.com';
+    const testPassword = process.env.TEST_ADMIN_PASSWORD || '0508445663';
+    const emailInput = page.locator('#admin-login-email');
+    await expect(emailInput).toBeVisible({ timeout: 5000 });
+    await emailInput.fill(testEmail);
+    await page.locator('#admin-login-password').fill(testPassword);
+    await page.getByRole('button', { name: /התחברות עם סיסמה/i }).click();
+    await expect(page).toHaveURL(/\/admin(?!\/login)/, { timeout: 15000 });
+
+    // 1. Verify the school switcher dropdown has no duplicate semel_mosad entries
+    const schoolSelect = page.locator('select[title="בחר מוסד להצגה (Super Admin)"]');
+    await expect(schoolSelect).toBeVisible({ timeout: 10000 });
+
+    const optionValues = await schoolSelect.locator('option').evaluateAll((opts) =>
+      opts.map((o) => (o as HTMLOptionElement).value)
+    );
+    const uniqueValues = Array.from(new Set(optionValues));
+    expect(optionValues.length).toBe(uniqueValues.length);
+
+    // 2. If institution 438466 ("ממ"ד תורני אריאל") exists, switch to it and verify shared teacher "מוריה" is visible
+    if (optionValues.includes('438466')) {
+      await schoolSelect.selectOption('438466');
+      await expect(page.getByText(/סמל מוסד:\s*438466/)).toBeVisible({ timeout: 10000 });
+
+      const manageTeachersBtn = page.getByRole('button', {
+        name: /ניהול מורים ומערכת שעות/i,
+      });
+      await manageTeachersBtn.click();
+      await expect(page.locator('.glass-modal').getByText('מוריה').first()).toBeVisible({
+        timeout: 10000,
+      });
+      await page.getByRole('button', { name: /סיום וסגירה/i }).click();
+    }
+  });
 });

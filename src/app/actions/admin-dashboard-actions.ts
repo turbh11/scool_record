@@ -125,61 +125,78 @@ export async function getAdminDashboardData(params: {
     }
 
     // 2. Fetch available schools for quick switching (useful for Super Admin)
+    // Deduplicate strictly by semel_mosad so co-admin schools never appear twice in the dropdown
     let availableSchools: { id: string; name: string; semel_mosad: string }[] = [];
     const { data: allSchools } = await supabase
       .from('schools')
-      .select('id, name, semel_mosad')
-      .order('name', { ascending: true });
+      .select('id, name, semel_mosad, admin_user_id, created_at')
+      .order('created_at', { ascending: true });
+
     if (allSchools && allSchools.length > 0) {
-      availableSchools = allSchools;
+      const seenSemels = new Set<string>();
+      for (const s of allSchools) {
+        const code = (s.semel_mosad || '').trim();
+        if (!code || seenSemels.has(code)) continue;
+        seenSemels.add(code);
+        availableSchools.push({
+          id: s.id,
+          name: s.name,
+          semel_mosad: code,
+        });
+      }
+      availableSchools.sort((a, b) => a.name.localeCompare(b.name, 'he'));
     }
 
-    // 3. Resolve School Data
-    if (userId) {
-      const { data: byAdminId } = await supabase
-        .from('schools')
-        .select('*')
-        .eq('admin_user_id', userId)
-        .maybeSingle();
-      schoolData = byAdminId;
-    }
-
-    if (!schoolData && resolvedCode && resolvedCode !== '---') {
-      const { data: bySemel } = await supabase
-        .from('schools')
-        .select('*')
-        .eq('semel_mosad', resolvedCode)
-        .maybeSingle();
-      schoolData = bySemel;
-    }
-
-    if (!schoolData && availableSchools.length > 0) {
-      // Pick first school if Super Admin or no specific school linked
-      const first = availableSchools[0];
-      const { data: firstFull } = await supabase
-        .from('schools')
-        .select('*')
-        .eq('id', first.id)
-        .maybeSingle();
-      schoolData = firstFull;
-      if (!resolvedCode || resolvedCode === '---') {
-        resolvedCode = firstFull?.semel_mosad || null;
+    // 3. Resolve School Data strictly by semel_mosad = resolvedCode FIRST
+    // Multiple co-admins (e.g. Principal & Vice Principal) share the exact same institution_code / semel_mosad
+    if ((!resolvedCode || resolvedCode === '---') && userId && allSchools) {
+      const linkedByUser = allSchools.find((s) => s.admin_user_id === userId);
+      if (linkedByUser?.semel_mosad) {
+        resolvedCode = linkedByUser.semel_mosad.trim();
       }
     }
 
-    // TASK 1: If database has NO schools at all, seed a real working default school
+    if (resolvedCode && resolvedCode !== '---') {
+      const { data: bySemelList } = await supabase
+        .from('schools')
+        .select('*')
+        .eq('semel_mosad', resolvedCode)
+        .order('created_at', { ascending: true })
+        .limit(1);
+      if (bySemelList && bySemelList.length > 0) {
+        schoolData = bySemelList[0] as School;
+      }
+    }
+
+    if (!schoolData && availableSchools.length > 0 && (!resolvedCode || resolvedCode === '---')) {
+      // Pick first school if Super Admin or no specific school code was resolved
+      const first = availableSchools[0];
+      const { data: firstFullList } = await supabase
+        .from('schools')
+        .select('*')
+        .eq('semel_mosad', first.semel_mosad)
+        .order('created_at', { ascending: true })
+        .limit(1);
+      schoolData = (firstFullList && firstFullList[0]) || null;
+      if (!resolvedCode || resolvedCode === '---') {
+        resolvedCode = schoolData?.semel_mosad || null;
+      }
+    }
+
+    // TASK 1: If database has NO matching school for resolvedCode, seed a real working school row for it
     if (!schoolData) {
       const defaultSemel = (resolvedCode && resolvedCode !== '---') ? resolvedCode : '440129';
       const defaultName = resolvedSchoolName || 'תיכון ממלכתי רבין - תל אביב';
 
-      const { data: existingSchool } = await supabase
+      const { data: existingList } = await supabase
         .from('schools')
         .select('*')
         .eq('semel_mosad', defaultSemel)
-        .maybeSingle();
+        .order('created_at', { ascending: true })
+        .limit(1);
 
-      if (existingSchool) {
-        schoolData = existingSchool;
+      if (existingList && existingList.length > 0) {
+        schoolData = existingList[0] as School;
       } else {
         const { data: newSchool, error: schoolCreateErr } = await supabase
           .from('schools')
@@ -198,18 +215,17 @@ export async function getAdminDashboardData(params: {
         if (newSchool) {
           schoolData = newSchool;
         } else {
-          const { data: anySchool } = await supabase
+          const { data: anySchoolList } = await supabase
             .from('schools')
             .select('*')
-            .limit(1)
-            .maybeSingle();
-          schoolData = anySchool;
+            .limit(1);
+          schoolData = (anySchoolList && anySchoolList[0]) || null;
         }
       }
 
       if (schoolData) {
         resolvedCode = schoolData.semel_mosad;
-        if (!availableSchools.some(s => s.id === schoolData!.id)) {
+        if (!availableSchools.some(s => s.semel_mosad === schoolData!.semel_mosad)) {
           availableSchools.push({ id: schoolData.id, name: schoolData.name, semel_mosad: schoolData.semel_mosad });
         }
       }
@@ -230,22 +246,47 @@ export async function getAdminDashboardData(params: {
       };
     }
 
-    // 4. Fetch Teachers
-    let teachersQuery = supabase
-      .from('teachers')
-      .select('*')
-      .eq('school_id', schoolData.id);
+    // 4. Fetch Teachers across the entire institution (by institution_code OR any school_id matching semel_mosad)
+    const matchingSchoolIds = Array.from(
+      new Set([
+        schoolData.id,
+        ...((allSchools || [])
+          .filter((s) => (s.semel_mosad || '').trim() === resolvedCode)
+          .map((s) => s.id)),
+      ])
+    ).filter((id) => UUID_REGEX.test(id));
 
-    if (resolvedCode) {
-      teachersQuery = teachersQuery.or(
-        `institution_code.eq.${resolvedCode},institution_code.is.null`
-      );
+    let teachersRaw: Teacher[] = [];
+    if (resolvedCode && matchingSchoolIds.length > 0) {
+      const { data: tList } = await supabase
+        .from('teachers')
+        .select('*')
+        .or(`institution_code.eq.${resolvedCode},school_id.in.(${matchingSchoolIds.join(',')})`)
+        .order('name', { ascending: true });
+      teachersRaw = (tList || []) as Teacher[];
+    } else if (resolvedCode) {
+      const { data: tList } = await supabase
+        .from('teachers')
+        .select('*')
+        .eq('institution_code', resolvedCode)
+        .order('name', { ascending: true });
+      teachersRaw = (tList || []) as Teacher[];
+    } else {
+      const { data: tList } = await supabase
+        .from('teachers')
+        .select('*')
+        .eq('school_id', schoolData.id)
+        .order('name', { ascending: true });
+      teachersRaw = (tList || []) as Teacher[];
     }
 
-    const { data: teachersList } = await teachersQuery.order('name', {
-      ascending: true,
-    });
-    const teachers = (teachersList || []) as Teacher[];
+    // Ensure strict institution isolation: keep teachers whose institution_code matches resolvedCode,
+    // or legacy teachers with null institution_code that belong to one of this institution's school_ids
+    const teachers = teachersRaw.filter(
+      (t) =>
+        t.institution_code === resolvedCode ||
+        (!t.institution_code && matchingSchoolIds.includes(t.school_id))
+    );
     const teacherIds = teachers.map((t) => t.id);
 
     // 5. Fetch Templates, Reports, and TimeSlots in parallel
@@ -393,30 +434,32 @@ export async function saveTeacherAction(
     let validInstitutionCode = payload.institution_code?.trim() || null;
     if (validInstitutionCode === '---') validInstitutionCode = null;
 
-    if (!validSchoolId || !UUID_REGEX.test(validSchoolId)) {
-      // 1. Try finding school by institution_code
-      if (validInstitutionCode) {
-        const { data: sch } = await supabase
-          .from('schools')
-          .select('id, semel_mosad')
-          .eq('semel_mosad', validInstitutionCode)
-          .maybeSingle();
-        if (sch) {
-          validSchoolId = sch.id;
-          validInstitutionCode = sch.semel_mosad;
-        }
+    // Always prefer the canonical school row for validInstitutionCode so co-admins share the exact same school_id
+    if (validInstitutionCode) {
+      const { data: schList } = await supabase
+        .from('schools')
+        .select('id, semel_mosad')
+        .eq('semel_mosad', validInstitutionCode)
+        .order('created_at', { ascending: true })
+        .limit(1);
+      if (schList && schList.length > 0) {
+        validSchoolId = schList[0].id;
+        validInstitutionCode = schList[0].semel_mosad;
       }
+    }
 
+    if (!validSchoolId || !UUID_REGEX.test(validSchoolId)) {
       // 2. Try default school 440129
       if (!validSchoolId || !UUID_REGEX.test(validSchoolId)) {
-        const { data: defaultSch } = await supabase
+        const { data: defaultSchList } = await supabase
           .from('schools')
           .select('id, semel_mosad')
           .eq('semel_mosad', '440129')
-          .maybeSingle();
-        if (defaultSch) {
-          validSchoolId = defaultSch.id;
-          if (!validInstitutionCode) validInstitutionCode = defaultSch.semel_mosad;
+          .order('created_at', { ascending: true })
+          .limit(1);
+        if (defaultSchList && defaultSchList.length > 0) {
+          validSchoolId = defaultSchList[0].id;
+          if (!validInstitutionCode) validInstitutionCode = defaultSchList[0].semel_mosad;
         }
       }
 

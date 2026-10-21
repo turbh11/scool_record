@@ -355,19 +355,23 @@ export async function registerNewSchoolAdmin(
       );
     }
 
-    // 2. Also create or link the corresponding row in `public.schools`
-    const { data: existingSchool } = await supabaseClient
+    // 2. Also create or link the corresponding row in `public.schools` strictly by `semel_mosad`
+    // Multiple co-admins (e.g., Principal & Vice Principal) with the same institutionCode share ONE school row!
+    const cleanSemel = institutionCode.trim();
+    const { data: existingSchools } = await supabaseClient
       .from('schools')
-      .select('id')
-      .eq('admin_user_id', createdUserId)
-      .maybeSingle();
+      .select('id, name, semel_mosad')
+      .eq('semel_mosad', cleanSemel)
+      .limit(1);
+
+    const existingSchool = existingSchools && existingSchools.length > 0 ? existingSchools[0] : null;
 
     if (!existingSchool) {
       const { error: schoolError } = await supabaseClient
         .from('schools')
         .insert({
           name: schoolName.trim(),
-          semel_mosad: institutionCode.trim(),
+          semel_mosad: cleanSemel,
           admin_user_id: createdUserId,
         });
 

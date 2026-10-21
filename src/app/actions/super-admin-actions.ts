@@ -292,15 +292,28 @@ export async function updateInstitutionProfile(
       };
     }
 
-    // Also update corresponding row in public.schools if linked
+    // Also update corresponding row in public.schools by semel_mosad (or admin_user_id if no conflict)
     try {
-      await supabaseAdmin
+      const { data: existingBySemel } = await supabaseAdmin
         .from('schools')
-        .update({
-          name: schoolName,
-          semel_mosad: institutionCode,
-        })
-        .eq('admin_user_id', cleanId);
+        .select('id')
+        .eq('semel_mosad', institutionCode)
+        .limit(1);
+
+      if (existingBySemel && existingBySemel.length > 0) {
+        await supabaseAdmin
+          .from('schools')
+          .update({ name: schoolName })
+          .eq('semel_mosad', institutionCode);
+      } else {
+        await supabaseAdmin
+          .from('schools')
+          .update({
+            name: schoolName,
+            semel_mosad: institutionCode,
+          })
+          .eq('admin_user_id', cleanId);
+      }
     } catch (schoolErr) {
       console.warn('[updateInstitutionProfile] Non-critical school update warning:', schoolErr);
     }
