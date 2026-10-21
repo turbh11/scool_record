@@ -7,8 +7,8 @@ test.describe('Admin Dashboard Flow', () => {
     await expect(page).toHaveURL(/\/admin\/login/);
 
     // 2. Fill in email and password from environment or test fallback
-    const testEmail = process.env.TEST_ADMIN_EMAIL || 'barakbenacon@gmail.com';
-    const testPassword = process.env.TEST_ADMIN_PASSWORD || '0508445663';
+    const testEmail = process.env.TEST_ADMIN_EMAIL || 'enter email';
+    const testPassword = process.env.TEST_ADMIN_PASSWORD || '123456';
 
     const emailInput = page.locator('#admin-login-email');
     const passwordInput = page.locator('#admin-login-password');
